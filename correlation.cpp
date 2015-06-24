@@ -7,6 +7,7 @@
 #include <vector>
 #include <iterator>
 #include <algorithm>
+#include <cmath>
 
 #define INTCUTOFF 0.05
 
@@ -59,7 +60,6 @@ double *calcCorrelation(double *y, int nSamples, int nCorr)
       corr[i]=corr[i]/(nSamples-i);
     }
 
-
   return(corr);
 }
 
@@ -84,6 +84,27 @@ void subtract_average(double *y, int nSamples)
 
   for(int i=0;i<nSamples;++i)
     y[i]-=avg;
+}
+// calculate the velocity time series by numerically differentiating the position time series
+
+double *velocity_series(double *y, int nSamples, double timestep)
+{
+  double *vel=new double[nSamples-1];
+  double avg=0.0;
+
+  // calculate velocity by finite difference approach and convert to m/s
+  for(int i=0;i<nSamples-1;++i)
+    vel[i]=(y[i+1]-y[i])/timestep*1E-10/1E-15;
+
+  for(int i=0;i<nSamples-1;++i)
+    avg+=vel[i];
+
+  avg/=nSamples-1;
+
+  for(int i=0;i<nSamples-1;++i)
+    vel[i]-=avg;
+  
+  return(vel);
 }
 
 double integrateCorr(double *acf, int nCorr, double timestep)
@@ -152,33 +173,27 @@ vector<double> readSeries(char *fname, int &numSamples, int field)
   return(series);
 }
 
-/*
-double *histogram(double *y, int nSamples)
+double laplace(double *series, double timestep, double s, int length)
 {
-  double *hist=new double[100];
-  int bin;
+  double F=0.0;
   
-  for(int i=0;i<100;++i)
-    hist[i]=0.0;
-  
-  for(int i=0;i<nSamples;++i)
+  for(int i=0;i<length;++i)
     {
-      bin=50.0*y[i]+50;
-      if(bin>0 && bin<100)
-	hist[bin]++;
+      F+=exp(-s*i*timestep)*series[i]*timestep;
     }
-  return(hist);
+  return(F);
 }
-*/
 
 int main(int argc, char *argv[])
 {
   int nCorr=5000;
   vector<double> series;
-  double *acf, *timeSeries;
-  double var, I;
+  double *vel;
+  double *acf, *vacf, *timeSeries;
+  double var, varVel, I;
   char *fname;
   double timestep=2.0;
+  double timestep_s=timestep*1E-15;
   int field=1;
   int numSamples;
 
@@ -189,7 +204,6 @@ int main(int argc, char *argv[])
 
   if(argc>1)
     field=atoi(argv[2]);
-  //  int numSamples=countLines(fname)-1;
 
   series=readSeries(fname, numSamples, field);
   timeSeries=&series[0];
@@ -197,24 +211,36 @@ int main(int argc, char *argv[])
   numSamples=numSamples-1;
 
   subtract_average(timeSeries, numSamples);
+  vel=velocity_series(timeSeries, numSamples, timestep);
   acf=calcCorrelation(timeSeries, numSamples, nCorr);
+  vacf=calcCorrelation(vel, numSamples-1, nCorr);
   var=variance(timeSeries, numSamples);
-
+  varVel=variance(vel, numSamples-1);
+  
   ofstream myfile;
   myfile.open(argv[3]);
+  
   for(int i=0;i<nCorr;++i)
-    myfile << i << " " << acf[i] << endl;
+    myfile << i << " " << acf[i] << " " << vacf[i] << endl;
   myfile.close();
   
   I=integrateCorr(acf, nCorr, timestep);
 
+  double s=0.00001;
+  while(s<0.01)
+    {
+      double laplaceVACF=laplace(vacf, timestep_s, s, nCorr);
+      double Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
+      cout << s << " " <<  laplaceVACF << " " << Ds << endl;
+      s=s+0.00001;
+    }
   cout << "#I = " << I << endl;
   cout << "#var = " << var << endl;
   cout << "#D = " << var*var/I << " A2/fs " << endl;
   cout << "#D = " << var*var/I*0.1 << " cm2/s " << endl;
 
-  for(int i=0;i<nCorr;++i)
-    cout << i << " " << acf[i] << endl;
   delete[] acf;
+  delete[] vacf;
+  delete[] timeseries;
   //  series.earse();
 }
