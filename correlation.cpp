@@ -8,6 +8,7 @@
 #include <iterator>
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 
 #define INTCUTOFF 0.05
 
@@ -25,6 +26,11 @@
   analysis of equilibrium and replica molecular dynamics simulations. New J. Phys. 2005,
   7, 34. */
 
+/* internal units:
+distance = angstrom
+time = femptoseconds
+velocity = Angstrom / femptoseconds
+*/
 using namespace std;
 
 /* Allen, M.; Tildesley, D. Computer Simulation of Liquids; Oxford Science Publications, Clarendon Press: Oxford, 1989. */
@@ -68,7 +74,6 @@ double variance(double *y, int nSamples)
   double v2=0.0;
   for(int i=0;i<nSamples;++i)
     v2+=y[i]*y[i];
-  //  cout << "variance << " << v2 << endl;
   v2/=nSamples;
   return(v2);
 }
@@ -76,32 +81,37 @@ double variance(double *y, int nSamples)
 void subtract_average(double *y, int nSamples)
 {
   double avg=0.0;
-
+  
   for(int i=0;i<nSamples;++i)
-    avg+=y[i];
- 
+    {
+      avg+=y[i];
+    }
   avg/=nSamples;
 
   for(int i=0;i<nSamples;++i)
     y[i]-=avg;
 }
+
 // calculate the velocity time series by numerically differentiating the position time series
 
 double *velocity_series(double *y, int nSamples, double timestep)
 {
-  double *vel=new double[nSamples-1];
+  double *vel=new double[nSamples-2];
   double avg=0.0;
+  cout<< "velseries " << nSamples << endl;
+  // calculate velocity by finite difference approach. units: A/fs
+  for(int i=1;i<nSamples-1;++i)
+    {    
+      vel[i-1]=(y[i+1]-y[i-1])/(2.0*timestep);
+    }
 
-  // calculate velocity by finite difference approach and convert to m/s
-  for(int i=0;i<nSamples-1;++i)
-    vel[i]=(y[i+1]-y[i])/timestep*1E-10/1E-15;
+  for(int i=0;i<nSamples-2;++i)
+    {
+      avg+=vel[i];
+    }
+  avg/=(nSamples-2);
 
-  for(int i=0;i<nSamples-1;++i)
-    avg+=vel[i];
-
-  avg/=nSamples-1;
-
-  for(int i=0;i<nSamples-1;++i)
+  for(int i=0;i<nSamples-2;++i)
     vel[i]-=avg;
   
   return(vel);
@@ -124,16 +134,12 @@ double integrateCorr(double *acf, int nCorr, double timestep)
   return(I);
 }
 
-double chi2(double *y, int nSamples, double var)
-{
-  long double chi2=0.0;
-  for(int i=0;i<nSamples;++i)
-    {
-      //      chi2=(y[i]-
-    }
-}
+// read time series from filename fname
+// file is formed like NAMD colvar traj file
+// store the number of points in numSamples
+// each line should store one time step
 
-vector<double> readSeries(char *fname, int &numSamples, int field)
+vector<double> readSeriesNAMD(char *fname, int &numSamples, int field)
 {
   ifstream datafile(fname);
   vector<double> series;
@@ -142,8 +148,7 @@ vector<double> readSeries(char *fname, int &numSamples, int field)
   string line;
   istringstream iss;
   int begin;
-
- 
+  
   if(field==1)
     begin=15;
   else if(field==2)
@@ -173,6 +178,41 @@ vector<double> readSeries(char *fname, int &numSamples, int field)
   return(series);
 }
 
+// read time series from filename fname
+// store the number of points in numSamples
+// each line should store one time step
+
+vector<double> readSeriesRaw(char *fname, int &numSamples)
+{
+  ifstream datafile(fname);
+  vector<double> series;
+  double *timeSeries;
+  int i=0;
+  string line;
+  istringstream iss;
+  int begin;
+  
+  numSamples=0;
+
+  while(getline(datafile,line))
+    {
+      if(line.at(0)!='#')
+	{
+	  try
+	    {
+	      series.push_back(atof(line.c_str()));
+	      ++numSamples;
+	    }
+	  catch (exception& e)
+	    {
+	      break;
+	    }
+	}
+    }
+
+  return(series);
+}
+
 double laplace(double *series, double timestep, double s, int length)
 {
   double F=0.0;
@@ -184,19 +224,46 @@ double laplace(double *series, double timestep, double s, int length)
   return(F);
 }
 
+
+// calculates intercept by linear interpolation
+
+double limit(const vector<double>& x, const vector<double>& y)
+{
+    int n=x.size();
+    double s_x  = accumulate(x.begin(), x.end(), 0.0);
+    double s_y  = accumulate(y.begin(), y.end(), 0.0);
+    double s_xx = inner_product(x.begin(), x.end(), x.begin(), 0.0);
+    double s_xy = inner_product(x.begin(), x.end(), y.begin(), 0.0);
+    double m=(n * s_xy - s_x * s_y) / (n * s_xx - s_x * s_x);
+    double b=(s_y-m*s_x)/n;
+    
+    cout << "#m " << m << endl;
+    cout << "#b " << b << endl;
+    return(b);
+}
+
 int main(int argc, char *argv[])
 {
-  int nCorr=5000;
-  vector<double> series;
-  double *vel;
+  int nCorr=1000;
+  vector<double> series, seriesVel;
+  double *velSeries;
   double *acf, *vacf, *timeSeries;
   double var, varVel, I;
   char *fname;
-  double timestep=2.0;
-  double timestep_s=timestep*1E-15;
+  double timestep=1.0;
+  double var_m2;
   int field=1;
   int numSamples;
-
+  double varAnalytical;
+  double k=10.0*4.184*1000;
+  double varVelAnalytical;
+  
+  varAnalytical=8.314*298.15/k;
+  varVelAnalytical=8.314*298.15/(18.01/1000.0)*1E-10;
+  
+  cout << "varAnalytical " << varAnalytical << endl;
+  cout << "varVelAnalytical " << varVelAnalytical << endl;
+  
   if(argc<1)
     return(1);
 
@@ -205,42 +272,59 @@ int main(int argc, char *argv[])
   if(argc>1)
     field=atoi(argv[2]);
 
-  series=readSeries(fname, numSamples, field);
+  series=readSeriesNAMD(fname, numSamples, field);
   timeSeries=&series[0];
 
-  numSamples=numSamples-1;
-
   subtract_average(timeSeries, numSamples);
-  vel=velocity_series(timeSeries, numSamples, timestep);
+  velSeries=velocity_series(timeSeries, numSamples, timestep);
+  
+  numSamples=numSamples-2;
+
   acf=calcCorrelation(timeSeries, numSamples, nCorr);
-  vacf=calcCorrelation(vel, numSamples-1, nCorr);
+  vacf=calcCorrelation(velSeries, numSamples, nCorr);
+
   var=variance(timeSeries, numSamples);
-  varVel=variance(vel, numSamples-1);
+  varVel=variance(velSeries, numSamples);
   
   ofstream myfile;
   myfile.open(argv[3]);
-  
+
   for(int i=0;i<nCorr;++i)
     myfile << i << " " << acf[i] << " " << vacf[i] << endl;
   myfile.close();
-  
-  I=integrateCorr(acf, nCorr, timestep);
 
-  double s=0.00001;
-  while(s<0.01)
+  I=integrateCorr(acf, nCorr, timestep);
+  
+  //  double s=0.003;
+  
+  vector<double> s_values;
+  vector<double> intDs;
+
+  cout << var << endl;
+  cout << "#varVel " << varVel << endl;
+  cout << "#varVelAnalytical " << varVelAnalytical << endl;
+
+  double s=0.01;
+  while(s<=0.04)
     {
-      double laplaceVACF=laplace(vacf, timestep_s, s, nCorr);
+      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
       double Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
-      cout << s << " " <<  laplaceVACF << " " << Ds << endl;
-      s=s+0.00001;
+
+      cout << s << " " <<  Ds << endl;
+      s_values.push_back(s);
+      intDs.push_back(Ds);
+      s=s+0.0001;
     }
+  
+  double limDs=limit(s_values, intDs);
+
   cout << "#I = " << I << endl;
   cout << "#var = " << var << endl;
   cout << "#D = " << var*var/I << " A2/fs " << endl;
   cout << "#D = " << var*var/I*0.1 << " cm2/s " << endl;
+  cout << "#Ds= " << limDs << " A2/s " << endl;
 
   delete[] acf;
   delete[] vacf;
-  delete[] timeseries;
   //  series.earse();
 }
