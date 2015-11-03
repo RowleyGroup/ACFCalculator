@@ -1,5 +1,6 @@
 #include <boost/program_options.hpp>
 #include <boost/math/tools/roots.hpp>
+#include <boost/math/tools/minima.hpp>
 
 #include <iostream>
 #include <fstream>
@@ -38,6 +39,65 @@ velocity = Angstrom / femptoseconds
 */
 //using namespace std;
 namespace po = boost::program_options;
+
+// http://vilipetek.com/2013/10/07/polynomial-fitting-in-c-using-boost/
+
+std::vector<T> polyfit( const std::vector<T>& oX,
+			const std::vector<T>& oY, int nDegree )
+{
+  using namespace boost::numeric::ublas;
+
+  if ( oX.size() != oY.size() )
+    throw std::invalid_argument( "X and Y vector sizes do not match" );
+
+  // more intuative this way
+  nDegree++;
+
+  size_t nCount =  oX.size();
+  matrix<T> oXMatrix( nCount, nDegree );
+  matrix<T> oYMatrix( nCount, 1 );
+
+  // copy y matrix
+  for ( size_t i = 0; i < nCount; i++ )
+    {
+      oYMatrix(i, 0) = oY[i];
+    }
+
+  // create the X matrix
+  for ( size_t nRow = 0; nRow < nCount; nRow++ )
+    {
+      T nVal = 1.0f;
+      for ( int nCol = 0; nCol < nDegree; nCol++ )
+	{
+	  oXMatrix(nRow, nCol) = nVal;
+	  nVal *= oX[nRow];
+	}
+    }
+
+  // transpose X matrix
+  matrix<T> oXtMatrix( trans(oXMatrix) );
+  // multiply transposed X matrix with X matrix
+  matrix<T> oXtXMatrix( prec_prod(oXtMatrix, oXMatrix) );
+  // multiply transposed X matrix with Y matrix
+  matrix<T> oXtYMatrix( prec_prod(oXtMatrix, oYMatrix) );
+
+  // lu decomposition
+  permutation_matrix<int> pert(oXtXMatrix.size1());
+  const std::size_t singular = lu_factorize(oXtXMatrix, pert);
+  // must be singular
+  BOOST_ASSERT( singular == 0 );
+
+  // backsubstitution
+  lu_substitute(oXtXMatrix, pert, oXtYMatrix);
+
+  // copy the result to coeff
+  return std::vector<T>( oXtYMatrix.data().begin(), oXtYMatrix.data().end() );
+}
+
+double denom(double s, double *vacf, int nCorr, double var, double varVel)
+{
+  laplaceVACF*(s*var+varVel/s)-var*varVel)
+}
 
 /* Allen, M.; Tildesley, D. Computer Simulation of Liquids; Oxford Science Publications, Clarendon Press: Oxford, 1989. */
 
@@ -233,7 +293,7 @@ double laplace(double *series, double timestep, double s, int length)
 
 // calculates intercept by linear interpolation
 
-double limit(const std::vector<double>& x, const std::vector<double>& y)
+double leastsquares(const std::vector<double>& x, const std::vector<double>& y)
 {
     int n=x.size();
     double s_x  = accumulate(x.begin(), x.end(), 0.0);
@@ -246,6 +306,24 @@ double limit(const std::vector<double>& x, const std::vector<double>& y)
     std::cout << "#m " << m << std::endl;
     std::cout << "#b " << b << std::endl;
     return(b);
+}
+
+//  fit y_i=f(x_i) to y=A.exp(-bx)
+//  ln y = ln A - bx
+// return A
+
+double exp_fit_linearregression(const std::vector<double>& x, const std::vector<double>& y)
+{
+  std::vector<double> lny;
+  int n=x.size();
+  
+  for(int i=0;i<x.size();++i)
+    {
+      lny.push_back(log(y[i]));
+    }
+  double intercept=leastsquares(x, lny);
+  
+  return(exp(intercept));
 }
 
 int main(int argc, char *argv[])
@@ -272,60 +350,64 @@ int main(int argc, char *argv[])
   
   desc.add_options()
     ("help,h", "produce help message")
-    ("timeseries,t", po::value<std::string>(), "file name of time series")
-    ("acf,a", po::value<std::string>(), "file name to save autocorrelation functions in")
+    ("timeseries,t", po::value<std::string>()->required(), "file name of time series")
+    ("acf,a", po::value<std::string>()->required(), "file name to save autocorrelation functions in")
     ("timestep,s", po::value<double>(&timestep)->default_value(DEFAULT_TIMESTEP), "time between samples in time series file (fs)")
     ("maxcorr,m", po::value<int>(&nCorr)->default_value(DEFAULT_MAXCORR), "maximum number of time steps to calculate correlation functions over")
+    ("field,f", po::value<int>(&field)->default_value(1), "index of field to read from time series file")
     ;
 
-  po::variables_map vm;
-  po::store(po::parse_command_line(argc, argv, desc), vm);
-  po::notify(vm);
-
-  if (vm.count("help"))
+  try
     {
-      std::cout << desc << "\n";
+      po::variables_map vm;
+      po::store(po::parse_command_line(argc, argv, desc), vm);
+      po::notify(vm);
+
+      if (vm.count("help"))
+	{
+	  std::cout << desc << "\n";
+	  return 1;
+	}
+      
+      if (vm.count("timeseries"))
+	{
+	  const std::string fname_str=vm["timeseries"].as<std::string>();
+	  fname=(char *) fname_str.c_str();
+	}
+      else
+	{
+	  std::cout << "Time series file must be provided" << std::endl;
+	  return(1);
+	}
+      
+      if (vm.count("acf"))
+	{
+	  const std::string acf_fname_str=vm["timeseries"].as<std::string>();
+	  acf_fname=(char *) acf_fname_str.c_str();
+	  write_acf=true;
+	}
+      else
+	{
+	  std::cout << "#ACF will not be saved" << std::endl;
+	  write_acf=false;
+	}
+
+      if (vm.count("timestep"))
+	{
+	  timestep=vm["timestep"].as<double>();
+	  std::cout << "Time step of " << timestep << " fs will be used." << std::endl;
+	}
+      else
+	{
+	  timestep=DEFAULT_TIMESTEP;
+	  std::cout << "Default timestep of " << std::endl;
+	}
+    }
+  catch ( const std::exception& e )
+    {
+      std::cerr << e.what() << std::endl;
       return 1;
     }
-  
-  if (vm.count("timeseries"))
-    {
-      std::cout << "#Time series will be read from "
-		<< vm["timeseries"].as<std::string>() << std::endl;
-      std::string fname_str=vm["timeseries"].as<std::string>();
-      fname=(char *) fname_str.c_str();
-    }
-  else
-    {
-      std::cout << "Time series file must be provided" << std::endl;
-      return(1);
-    }
-  
-  if (vm.count("acf"))
-    {
-      std::cout << "#ACF will be written to "
-		<< vm["acf"].as<int>() << std::endl;
-      std::string acf_fname_str=vm["timeseries"].as<std::string>();
-      acf_fname=(char *) acf_fname_str.c_str();
-      write_acf=true;
-    }
-  else
-    {
-      std::cout << "#ACF will not be saved" << std::endl;
-      write_acf=false;
-    }
-
-  if (vm.count("timestep"))
-    {
-      timestep=vm["timestep"].as<double>();
-      std::cout << "Time step of " << timestep << " fs will be used." << std::endl;
-    }
-  else
-    {
-      timestep=DEFAULT_TIMESTEP;
-      std::cout << "Default timestep of " << std::endl;
-    }
-
   
   std::cout << "#varAnalytical " << varAnalytical << std::endl;
   std::cout << "#varVelAnalytical " << varVelAnalytical << std::endl;
@@ -371,19 +453,29 @@ int main(int argc, char *argv[])
   std::cout << "#varVel " << varVel << std::endl;
   std::cout << "#varVelAnalytical " << varVelAnalytical << std::endl;
 
-  double s=0.0001;
-  while(s<=0.8)
+  // Step 1: Find value of s where denominator is a minimum(laplaceVACF*(s*var+varVel/s)-var*varVel)
+  typedef std::pair<double, double> S_pair;
+  S_pair s_min_pair=math::tools::brent_find_minima(denom, s_min, s_max);
+  double s_min=s_min_pair.second;
+  
+  // Step2: calculate s over range of [s_min, 5*s_min]
+  
+  double s=s_min;
+  
+  while(s<=5.0*s_min)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
       double Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
 
-      std::cout << s << " " <<  Ds << " " << laplaceVACF <<  " " << -(laplaceVACF*var*varVel) << " " << 1.0/(laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
+      std::cout << s << " " <<  Ds << " " << laplaceVACF <<  " " << -(laplaceVACF*var*varVel) << " " << 1.0/(laplaceVACF*(s*var+varVel/s)-var*varVel) << " " << (laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
       s_values.push_back(s);
       intDs.push_back(Ds);
       s=s+0.0001;
     }
-  
-  double limDs=limit(s_values, intDs);
+
+  // Step 3
+  exp_fit_linearregression(s_values, intDs);
+  double limDs=leastsquares(s_values, intDs);
 
   std::cout << "#I = " << I << std::endl;
   std::cout << "#var = " << var << std::endl;
