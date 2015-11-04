@@ -2,13 +2,20 @@
 #include <boost/math/tools/roots.hpp>
 #include <boost/math/tools/minima.hpp>
 
+#include <boost/numeric/ublas/matrix.hpp>
+#include <boost/numeric/ublas/lu.hpp>
+#include <boost/numeric/ublas/vector.hpp>
+
+#include <stdexcept>
+
 #include <iostream>
 #include <fstream>
+
 //#include <sstream>
 //#include <string>
 //#include <cstdlib>
 //#include <stdlib.h>
-//#include <vector>
+#include <vector>
 //#include <iterator>
 //#include <algorithm>
 //#include <cmath>
@@ -42,8 +49,8 @@ namespace po = boost::program_options;
 
 // http://vilipetek.com/2013/10/07/polynomial-fitting-in-c-using-boost/
 
-std::vector<T> polyfit( const std::vector<T>& oX,
-			const std::vector<T>& oY, int nDegree )
+std::vector<double> polyfit( const std::vector<double>& oX,
+			const std::vector<double>& oY, int nDegree )
 {
   using namespace boost::numeric::ublas;
 
@@ -54,8 +61,8 @@ std::vector<T> polyfit( const std::vector<T>& oX,
   nDegree++;
 
   size_t nCount =  oX.size();
-  matrix<T> oXMatrix( nCount, nDegree );
-  matrix<T> oYMatrix( nCount, 1 );
+  matrix<double> oXMatrix( nCount, nDegree );
+  matrix<double> oYMatrix( nCount, 1 );
 
   // copy y matrix
   for ( size_t i = 0; i < nCount; i++ )
@@ -66,7 +73,7 @@ std::vector<T> polyfit( const std::vector<T>& oX,
   // create the X matrix
   for ( size_t nRow = 0; nRow < nCount; nRow++ )
     {
-      T nVal = 1.0f;
+      double nVal = 1.0f;
       for ( int nCol = 0; nCol < nDegree; nCol++ )
 	{
 	  oXMatrix(nRow, nCol) = nVal;
@@ -75,11 +82,11 @@ std::vector<T> polyfit( const std::vector<T>& oX,
     }
 
   // transpose X matrix
-  matrix<T> oXtMatrix( trans(oXMatrix) );
+  matrix<double> oXtMatrix( trans(oXMatrix) );
   // multiply transposed X matrix with X matrix
-  matrix<T> oXtXMatrix( prec_prod(oXtMatrix, oXMatrix) );
+  matrix<double> oXtXMatrix( prec_prod(oXtMatrix, oXMatrix) );
   // multiply transposed X matrix with Y matrix
-  matrix<T> oXtYMatrix( prec_prod(oXtMatrix, oYMatrix) );
+  matrix<double> oXtYMatrix( prec_prod(oXtMatrix, oYMatrix) );
 
   // lu decomposition
   permutation_matrix<int> pert(oXtXMatrix.size1());
@@ -91,12 +98,32 @@ std::vector<T> polyfit( const std::vector<T>& oX,
   lu_substitute(oXtXMatrix, pert, oXtYMatrix);
 
   // copy the result to coeff
-  return std::vector<T>( oXtYMatrix.data().begin(), oXtYMatrix.data().end() );
+  return std::vector<double>( oXtYMatrix.data().begin(), oXtYMatrix.data().end() );
 }
 
-double denom(double s, double *vacf, int nCorr, double var, double varVel)
+double *vacf;
+int nCorr;
+double var;
+double varVel;
+double timestep;
+
+double laplace(double *series, double timestep, double s, int length)
 {
-  laplaceVACF*(s*var+varVel/s)-var*varVel)
+  double F=0.0;
+
+  for(int i=0;i<length;++i)
+    {
+      F+=exp(-s*i*timestep)*series[i]*timestep;
+    }
+  return(F);
+}
+
+double denom(double s)
+{
+  double laplaceVACF=laplace(vacf, timestep, s, nCorr);
+  double f=laplaceVACF*(s*var+varVel/s)-var*varVel;
+  std::cout << s << " " << f << " " << var << " " << varVel << " " << nCorr << " " << laplaceVACF <<  std::endl;
+  return(f);
 }
 
 /* Allen, M.; Tildesley, D. Computer Simulation of Liquids; Oxford Science Publications, Clarendon Press: Oxford, 1989. */
@@ -279,18 +306,6 @@ std::vector<double> readSeriesRaw(char *fname, int &numSamples)
   return(series);
 }
 
-double laplace(double *series, double timestep, double s, int length)
-{
-  double F=0.0;
-  
-  for(int i=0;i<length;++i)
-    {
-      F+=exp(-s*i*timestep)*series[i]*timestep;
-    }
-  return(F);
-}
-
-
 // calculates intercept by linear interpolation
 
 double leastsquares(const std::vector<double>& x, const std::vector<double>& y)
@@ -329,20 +344,19 @@ double exp_fit_linearregression(const std::vector<double>& x, const std::vector<
 int main(int argc, char *argv[])
 {
   bool write_acf;
-  int nCorr;
   std::vector<double> series, seriesVel;
   double *velSeries;
-  double *acf, *vacf, *timeSeries;
-  double var, varVel, I;
+  double *acf, *timeSeries;
+  double I;
   char *fname, *acf_fname;
-  double timestep=1.0;
   double var_m2;
   int field=1;
   int numSamples;
   double varAnalytical;
   double k=10.0*4.184*1000;
   double varVelAnalytical;
-  
+
+  timestep=1.0;
   varAnalytical=8.314*298.15/k;
   varVelAnalytical=8.314*298.15/(18.01/1000.0)*1E-10;
 
@@ -395,12 +409,12 @@ int main(int argc, char *argv[])
       if (vm.count("timestep"))
 	{
 	  timestep=vm["timestep"].as<double>();
-	  std::cout << "Time step of " << timestep << " fs will be used." << std::endl;
+	  std::cout << "#Time step of " << timestep << " fs will be used." << std::endl;
 	}
       else
 	{
 	  timestep=DEFAULT_TIMESTEP;
-	  std::cout << "Default timestep of " << std::endl;
+	  std::cout << "#Default timestep of " << std::endl;
 	}
     }
   catch ( const std::exception& e )
@@ -446,21 +460,27 @@ int main(int argc, char *argv[])
   
   //  double s=0.003;
   
-  std::vector<double> s_values;
-  std::vector<double> intDs;
-
   std::cout << "#" << var << std::endl;
   std::cout << "#varVel " << varVel << std::endl;
   std::cout << "#varVelAnalytical " << varVelAnalytical << std::endl;
-
+  std::cout << "#nCorr " << nCorr << std::endl;
+  
   // Step 1: Find value of s where denominator is a minimum(laplaceVACF*(s*var+varVel/s)-var*varVel)
   typedef std::pair<double, double> S_pair;
-  S_pair s_min_pair=math::tools::brent_find_minima(denom, s_min, s_max);
-  double s_min=s_min_pair.second;
+  double s_lower=0.000001;
+  double s_upper=1.0;
+  
+  S_pair s_min_pair=boost::math::tools::brent_find_minima(denom, s_lower, s_upper, 30);
+  double s_min=s_min_pair.first;
+
+  std::cout << "#s_min = " << s_min << std::endl;
+  return(1);
   
   // Step2: calculate s over range of [s_min, 5*s_min]
   
   double s=s_min;
+  std::vector<double> s_values;
+  std::vector<double> intDs;
   
   while(s<=5.0*s_min)
     {
