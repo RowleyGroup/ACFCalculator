@@ -6,6 +6,13 @@
 #include <boost/numeric/ublas/lu.hpp>
 #include <boost/numeric/ublas/vector.hpp>
 
+using boost::math::policies::policy;
+using boost::math::tools::newton_raphson_iterate;
+using boost::math::tools::halley_iterate;
+using boost::math::tools::eps_tolerance; // Binary functor for specified number of bits.
+using boost::math::tools::bracket_and_solve_root;
+using boost::math::tools::toms748_solve;
+
 #include <stdexcept>
 
 #include <iostream>
@@ -107,6 +114,10 @@ double var;
 double varVel;
 double timestep;
 
+template <typename T> int sgn(T val) {
+    return (T(0) < val) - (val < T(0));
+}
+
 double laplace(double *series, double timestep, double s, int length)
 {
   double F=0.0;
@@ -118,12 +129,52 @@ double laplace(double *series, double timestep, double s, int length)
   return(F);
 }
 
+
 double denom(double s)
 {
   double laplaceVACF=laplace(vacf, timestep, s, nCorr);
   double f=laplaceVACF*(s*var+varVel/s)-var*varVel;
-  std::cout << s << " " << f << " " << var << " " << varVel << " " << nCorr << " " << laplaceVACF <<  std::endl;
   return(f);
+}
+
+double Ds(double s)
+{
+  double laplaceVACF=laplace(vacf, timestep, s, nCorr);
+  double f=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
+  return(f);
+}
+
+double bisect(double lower, double upper)
+{
+  int it=0;
+  double fa=denom(lower);
+  double fb=denom(upper);
+  double fmid=0.0;
+  double mid;
+  
+  while(it<1000)
+    {
+      mid=(lower+upper)/2.0;
+      fmid=denom(mid);
+      
+      if(fabs(fmid)<1E-10)
+	{
+	  return(mid);
+	}
+      
+      if(sgn(fmid)==sgn(fa))
+	{
+	  lower=mid;
+	  fa=fmid;
+	}
+      else
+	{
+	  upper=mid;
+	  fb=fmid;
+	}
+      ++it;
+    }
+  return(mid);
 }
 
 /* Allen, M.; Tildesley, D. Computer Simulation of Liquids; Oxford Science Publications, Clarendon Press: Oxford, 1989. */
@@ -191,7 +242,6 @@ double *velocity_series(double *y, int nSamples, double timestep)
 {
   double *vel=new double[nSamples-2];
   double avg=0.0;
-  std::cout<< "#velseries " << nSamples << std::endl;
   // calculate velocity by finite difference approach. units: A/fs
   for(int i=1;i<nSamples-1;++i)
     {    
@@ -234,7 +284,7 @@ double integrateCorr(double *acf, int nCorr, double timestep)
 
 std::vector<double> readSeriesNAMD(char *fname, int &numSamples, int field)
 {
-  std::ifstream datafile(fname);
+  std::ifstream datafile(fname, std::ifstream::in);
   std::vector<double> series;
   double *timeSeries;
   int i=0;
@@ -277,7 +327,7 @@ std::vector<double> readSeriesNAMD(char *fname, int &numSamples, int field)
 
 std::vector<double> readSeriesRaw(char *fname, int &numSamples)
 {
-  std::ifstream datafile(fname);
+  std::ifstream datafile(fname, std::ifstream::in);
   std::vector<double> series;
   double *timeSeries;
   int i=0;
@@ -348,14 +398,15 @@ int main(int argc, char *argv[])
   double *velSeries;
   double *acf, *timeSeries;
   double I;
-  char *fname, *acf_fname;
+  char *fname, *acf_fname, *output_fname;
   double var_m2;
   int field=1;
   int numSamples;
   double varAnalytical;
   double k=10.0*4.184*1000;
   double varVelAnalytical;
-
+  double varVel;
+  
   timestep=1.0;
   varAnalytical=8.314*298.15/k;
   varVelAnalytical=8.314*298.15/(18.01/1000.0)*1E-10;
@@ -366,6 +417,7 @@ int main(int argc, char *argv[])
     ("help,h", "produce help message")
     ("timeseries,t", po::value<std::string>()->required(), "file name of time series")
     ("acf,a", po::value<std::string>()->required(), "file name to save autocorrelation functions in")
+    ("output,o", po::value<std::string>()->required(), "file name to save output to")
     ("timestep,s", po::value<double>(&timestep)->default_value(DEFAULT_TIMESTEP), "time between samples in time series file (fs)")
     ("maxcorr,m", po::value<int>(&nCorr)->default_value(DEFAULT_MAXCORR), "maximum number of time steps to calculate correlation functions over")
     ("field,f", po::value<int>(&field)->default_value(1), "index of field to read from time series file")
@@ -386,7 +438,8 @@ int main(int argc, char *argv[])
       if (vm.count("timeseries"))
 	{
 	  const std::string fname_str=vm["timeseries"].as<std::string>();
-	  fname=(char *) fname_str.c_str();
+	  fname = new char [fname_str.length()+1];
+	  std::strcpy(fname, fname_str.c_str());
 	}
       else
 	{
@@ -396,8 +449,9 @@ int main(int argc, char *argv[])
       
       if (vm.count("acf"))
 	{
-	  const std::string acf_fname_str=vm["timeseries"].as<std::string>();
-	  acf_fname=(char *) acf_fname_str.c_str();
+	  const std::string acf_fname_str=vm["acf"].as<std::string>();
+	  acf_fname = new char [acf_fname_str.length()+1];
+	  std::strcpy(acf_fname, acf_fname_str.c_str());
 	  write_acf=true;
 	}
       else
@@ -416,6 +470,19 @@ int main(int argc, char *argv[])
 	  timestep=DEFAULT_TIMESTEP;
 	  std::cout << "#Default timestep of " << std::endl;
 	}
+
+
+      if (vm.count("output"))
+	{
+	  const std::string output_fname_str=vm["output"].as<std::string>();
+	  output_fname = new char [output_fname_str.length()+1];
+	  std::strcpy(output_fname, output_fname_str.c_str());
+	  std::cout << "#D(s) will be saved in " << output_fname << std::endl;
+	}
+      else
+	{
+	  std::cout << "#D(s) will not be saved" << std::endl;
+	}
     }
   catch ( const std::exception& e )
     {
@@ -423,14 +490,6 @@ int main(int argc, char *argv[])
       return 1;
     }
   
-  std::cout << "#varAnalytical " << varAnalytical << std::endl;
-  std::cout << "#varVelAnalytical " << varVelAnalytical << std::endl;
-  
-  boost::math::tools::eps_tolerance<double> tol(10);
-
-  // find singulatity by finding root in denominator
-  //  std::pair<T, T> s_singularity =
-  //  bracket_and_solve_root(cbrt_functor_1<T>(x), guess, factor, is_rising, tol, it);
   
   series=readSeriesNAMD(fname, numSamples, field);
   timeSeries=&series[0];
@@ -458,50 +517,125 @@ int main(int argc, char *argv[])
   
   I=integrateCorr(acf, nCorr, timestep);
   
-  //  double s=0.003;
-  
   std::cout << "#" << var << std::endl;
   std::cout << "#varVel " << varVel << std::endl;
   std::cout << "#varVelAnalytical " << varVelAnalytical << std::endl;
   std::cout << "#nCorr " << nCorr << std::endl;
   
+  double s=0.0001;
+  std::ofstream out_file(output_fname,  std::ofstream::out);
+  std::cout << "#output " << output_fname << std::endl;
+
+  double s_min_num=1000;
+  double s_min_loc=-1.0;
+  while(s<=1.0)
+    {
+      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
+      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
+      double Ds=-(laplaceVACF*var*varVel)/denom;
+
+      if(denom<s_min_num)
+	{
+	  s_min_num=denom;
+	  s_min_loc=s;
+	}
+      out_file << s << " " <<  Ds << " " << laplaceVACF <<  " " << -(laplaceVACF*var*varVel) << " " << 1.0/(laplaceVACF*(s*var+varVel/s)-var*varVel) << " " << (laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
+      s=s+0.0001;
+    }
+  out_file.close();
+  
   // Step 1: Find value of s where denominator is a minimum(laplaceVACF*(s*var+varVel/s)-var*varVel)
   typedef std::pair<double, double> S_pair;
   double s_lower=0.000001;
   double s_upper=1.0;
-  
-  S_pair s_min_pair=boost::math::tools::brent_find_minima(denom, s_lower, s_upper, 30);
+  S_pair s_min_pair=boost::math::tools::brent_find_minima(denom, s_lower, s_upper, 50);
   double s_min=s_min_pair.first;
 
-  std::cout << "#s_min = " << s_min << std::endl;
-  return(1);
+
+  // find singularity numerically
+  s=0.0001;
   
-  // Step2: calculate s over range of [s_min, 5*s_min]
+  double root=1.0;
+  double root_loc=s_min_loc;
   
-  double s=s_min;
+  while(s<=0.1)
+    {
+      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
+      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
+      std::cout << "#root "<< s << " " << denom << std::endl;
+      if(abs(denom)<root)
+	{
+	  root=abs(denom);
+	  root_loc=s;
+	}
+      if(denom<0)
+	break;
+      s=s+0.00001;
+    }
+  root_loc=s;
+  
+  double Ds=1.0;
+  double Ds_prev=1.0;
+
+  std::cout << "#root " << root_loc << std::endl;
+
+  // Find minima of Ds after root
+  s=root_loc;
+  while(s<=1.0)
+    {
+      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
+      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
+      Ds_prev=Ds;
+      Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
+      std::cout << "# s "<< s << " Ds_prev " << Ds_prev << " " << Ds << std::endl;
+      if(Ds>Ds_prev)
+	{
+	  break;
+	}
+      s=s+0.00001;
+    }
+  
+  double Ds_min=s;
+  
+  //  std::cout << "#s_min = " << s_min << " "  << root_loc << " " << s_min_loc << std::endl;
+  //s_lower=s_min;
+  //s_upper=1.0;
+  //  S_pair Ds_min_pair=boost::math::tools::brent_find_minima(Ds, s_lower, s_upper, 50);
+  //  double Ds_min=Ds_min_pair.first;
+  std::cout << "Ds_min " << Ds_min << std::endl;
+  // Step2: calculate s over range of [2*s_min, 4*s_min]
+  
+  s=3*Ds_min;
+  
+  double s_delta=1.0*Ds_min/100; // calculate D(s) at 100 points betewen 3 s_min and 4 s_min
+  
   std::vector<double> s_values;
   std::vector<double> intDs;
   
-  while(s<=5.0*s_min)
+  while(s<=4*Ds_min)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
       double Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
-
+      double logDs=log(Ds);
       std::cout << s << " " <<  Ds << " " << laplaceVACF <<  " " << -(laplaceVACF*var*varVel) << " " << 1.0/(laplaceVACF*(s*var+varVel/s)-var*varVel) << " " << (laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
       s_values.push_back(s);
       intDs.push_back(Ds);
-      s=s+0.0001;
+      s=s+s_delta;
     }
 
   // Step 3
-  exp_fit_linearregression(s_values, intDs);
-  double limDs=leastsquares(s_values, intDs);
+  std::vector<double> P=polyfit(s_values, intDs, 1);
 
+  for(int i=0;i<2;++i)
+    {
+      std::cout << "#P " << i << " " << P[i] << std::endl;
+    }
+ 
   std::cout << "#I = " << I << std::endl;
   std::cout << "#var = " << var << std::endl;
   std::cout << "#D = " << var*var/I << " A2/fs " << std::endl;
   std::cout << "#D = " << var*var/I*0.1 << " cm2/s " << std::endl;
-  std::cout << "#Ds= " << limDs << " A2/s " << std::endl;
+  std::cout << "#Ds= " << P[0]*0.1 << " cm2/s " << std::endl;
 
   delete[] acf;
   delete[] vacf;
