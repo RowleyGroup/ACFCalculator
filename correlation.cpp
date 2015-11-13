@@ -415,10 +415,12 @@ int main(int argc, char *argv[])
   
   desc.add_options()
     ("help,h", "produce help message")
-    ("timeseries,t", po::value<std::string>()->required(), "file name of time series")
+    ("input,i", po::value<std::string>()->required(), "file name of time series")
+    ("type,t", po::value<std::string>()->required(), "type of time series (namd, charmm, gromacs, amber, txt)")
+    ("cutoff,c", po::value<double>->default_value(INTCUTOFF), "cutoff to integrate ACF")  
     ("acf,a", po::value<std::string>()->required(), "file name to save autocorrelation functions in")
     ("output,o", po::value<std::string>()->required(), "file name to save output to")
-    ("timestep,s", po::value<double>(&timestep)->default_value(DEFAULT_TIMESTEP), "time between samples in time series file (fs)")
+    ("timestep,ts", po::value<double>(&timestep)->default_value(DEFAULT_TIMESTEP), "time between samples in time series file (fs)")
     ("maxcorr,m", po::value<int>(&nCorr)->default_value(DEFAULT_MAXCORR), "maximum number of time steps to calculate correlation functions over")
     ("field,f", po::value<int>(&field)->default_value(1), "index of field to read from time series file")
     ;
@@ -435,9 +437,9 @@ int main(int argc, char *argv[])
 	  return 1;
 	}
       
-      if (vm.count("timeseries"))
+      if (vm.count("input"))
 	{
-	  const std::string fname_str=vm["timeseries"].as<std::string>();
+	  const std::string fname_str=vm["input"].as<std::string>();
 	  fname = new char [fname_str.length()+1];
 	  std::strcpy(fname, fname_str.c_str());
 	}
@@ -446,6 +448,18 @@ int main(int argc, char *argv[])
 	  std::cout << "Time series file must be provided" << std::endl;
 	  return(1);
 	}
+	
+     if(vm.count("type"))
+        {
+	  const std::string type_str=vm["type"].as<std::string>();
+	  type=new char [type_str.length()+1];
+	  std::strcpy(type, type_str.c_str());
+        }
+
+      else
+      {
+	  std::cout<<"Type of file not provided"<<std::endl;
+      }
       
       if (vm.count("acf"))
 	{
@@ -470,7 +484,17 @@ int main(int argc, char *argv[])
 	  timestep=DEFAULT_TIMESTEP;
 	  std::cout << "#Default timestep of " << std::endl;
 	}
-
+	
+      if(vm.count("cutoff"))
+      {
+	  cutoff=vm["cutoff"].as<double>();
+	  std::cout<<"#Cutoff of "<<cutoff<<" will be used."<<std::endl;
+      }
+      else
+      {
+	  cutoff=INTCUTOFF;
+	  std::cout<<"Default cutoff of "<<cutoff<<" will be used."<<std::endl;
+      }
 
       if (vm.count("output"))
 	{
