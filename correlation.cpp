@@ -398,7 +398,7 @@ int main(int argc, char *argv[])
   double *velSeries;
   double *acf, *timeSeries;
   double I;
-  char *fname, *acf_fname, *output_fname;
+  char *fname, *acf_fname, *output_fname, *type;
   double var_m2;
   int field=1;
   int numSamples;
@@ -406,7 +406,8 @@ int main(int argc, char *argv[])
   double k=10.0*4.184*1000;
   double varVelAnalytical;
   double varVel;
-  
+  double cutoff; 
+
   timestep=1.0;
   varAnalytical=8.314*298.15/k;
   varVelAnalytical=8.314*298.15/(18.01/1000.0)*1E-10;
@@ -417,7 +418,7 @@ int main(int argc, char *argv[])
     ("help,h", "produce help message")
     ("input,i", po::value<std::string>()->required(), "file name of time series")
     ("type,t", po::value<std::string>()->required(), "type of time series (namd, charmm, gromacs, amber, txt)")
-    ("cutoff,c", po::value<double>->default_value(INTCUTOFF), "cutoff to integrate ACF")  
+    ("cutoff,c", po::value<double>()->default_value(INTCUTOFF), "cutoff to integrate ACF")  
     ("acf,a", po::value<std::string>()->required(), "file name to save autocorrelation functions in")
     ("output,o", po::value<std::string>()->required(), "file name to save output to")
     ("timestep,ts", po::value<double>(&timestep)->default_value(DEFAULT_TIMESTEP), "time between samples in time series file (fs)")
@@ -545,6 +546,7 @@ int main(int argc, char *argv[])
   std::cout << "#varVel " << varVel << std::endl;
   std::cout << "#varVelAnalytical " << varVelAnalytical << std::endl;
   std::cout << "#nCorr " << nCorr << std::endl;
+  std::cout << "#cutoff" << cutoff << std::endl;
   
   double s=0.0001;
   std::ofstream out_file(output_fname,  std::ofstream::out);
