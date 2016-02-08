@@ -18,15 +18,7 @@ using boost::math::tools::toms748_solve;
 #include <iostream>
 #include <fstream>
 
-//#include <sstream>
-//#include <string>
-//#include <cstdlib>
-//#include <stdlib.h>
 #include <vector>
-//#include <iterator>
-//#include <algorithm>
-//#include <cmath>
-//#include <numeric>
 
 #define INTCUTOFF 0.05
 #define DEFAULT_MAXCORR 1000
@@ -51,13 +43,13 @@ distance = angstrom
 time = femptoseconds
 velocity = Angstrom / femptoseconds
 */
-//using namespace std;
+
 namespace po = boost::program_options;
 
 // http://vilipetek.com/2013/10/07/polynomial-fitting-in-c-using-boost/
 
 std::vector<double> polyfit( const std::vector<double>& oX,
-			const std::vector<double>& oY, int nDegree )
+                        const std::vector<double>& oY, int nDegree )
 {
   using namespace boost::numeric::ublas;
 
@@ -82,10 +74,10 @@ std::vector<double> polyfit( const std::vector<double>& oX,
     {
       double nVal = 1.0f;
       for ( int nCol = 0; nCol < nDegree; nCol++ )
-	{
-	  oXMatrix(nRow, nCol) = nVal;
-	  nVal *= oX[nRow];
-	}
+        {
+          oXMatrix(nRow, nCol) = nVal;
+          nVal *= oX[nRow];
+        }
     }
 
   // transpose X matrix
@@ -151,27 +143,27 @@ double bisect(double lower, double upper)
   double fb=denom(upper);
   double fmid=0.0;
   double mid;
-  
+
   while(it<1000)
     {
       mid=(lower+upper)/2.0;
       fmid=denom(mid);
-      
+
       if(fabs(fmid)<1E-10)
-	{
-	  return(mid);
-	}
-      
+        {
+          return(mid);
+        }
+
       if(sgn(fmid)==sgn(fa))
-	{
-	  lower=mid;
-	  fa=fmid;
-	}
+        {
+          lower=mid;
+          fa=fmid;
+        }
       else
-	{
-	  upper=mid;
-	  fb=fmid;
-	}
+        {
+          upper=mid;
+          fb=fmid;
+        }
       ++it;
     }
   return(mid);
@@ -196,13 +188,13 @@ double *calcCorrelation(double *y, int nSamples, int nCorr)
       ttoMax=nSamples;
 
       if(i+nCorr<nSamples)
-	ttoMax=i+nCorr;
+        ttoMax=i+nCorr;
 
       for(int j=i;j<ttoMax;++j)
-	{
-	  t=j-i;
-	  corr[t]+=y[i]*y[j];
-	}
+        {
+          t=j-i;
+          corr[t]+=y[i]*y[j];
+        }
     }
 
   for(int i=0;i<nCorr;++i)
@@ -225,7 +217,7 @@ double variance(double *y, int nSamples)
 void subtract_average(double *y, int nSamples)
 {
   double avg=0.0;
-  
+
   for(int i=0;i<nSamples;++i)
     {
       avg+=y[i];
@@ -244,7 +236,7 @@ double *velocity_series(double *y, int nSamples, double timestep)
   double avg=0.0;
   // calculate velocity by finite difference approach. units: A/fs
   for(int i=1;i<nSamples-1;++i)
-    {    
+    {
       vel[i-1]=(y[i+1]-y[i-1])/(2.0*timestep);
     }
 
@@ -256,7 +248,7 @@ double *velocity_series(double *y, int nSamples, double timestep)
 
   for(int i=0;i<nSamples-2;++i)
     vel[i]-=avg;
-  
+
   return(vel);
 }
 
@@ -269,9 +261,6 @@ double integrateCorr(double *acf, int nCorr, double timestep)
 
   for(int i=0;i<nCorr-1;++i)
     {
-      //      if(acf[i]<threshhold)
-      //	break;
-      
       I+=0.5*(acf[i]+acf[i+1])*timestep;
     }
   return(I);
@@ -291,7 +280,7 @@ std::vector<double> readSeriesNAMD(char *fname, int &numSamples, int field)
   std::string line;
   std::istringstream iss;
   int begin;
-  
+
   if(field==1)
     begin=15;
   else if(field==2)
@@ -304,18 +293,18 @@ std::vector<double> readSeriesNAMD(char *fname, int &numSamples, int field)
   while(getline(datafile,line))
     {
       if(line.at(0)!='#')
-	{
-	  try
-	    {
-	      std::string str2=line.substr(begin,23);
-	      series.push_back(atof(str2.c_str()));
-	      ++numSamples;
-	    }
-	  catch (std::exception& e)
-	    {
-	      break;
-	    }
-	}
+        {
+          try
+            {
+              std::string str2=line.substr(begin,23);
+              series.push_back(atof(str2.c_str()));
+              ++numSamples;
+            }
+          catch (std::exception& e)
+            {
+              break;
+            }
+        }
     }
 
   return(series);
@@ -334,23 +323,23 @@ std::vector<double> readSeriesRaw(char *fname, int &numSamples)
   std::string line;
   std::istringstream iss;
   int begin;
-  
+
   numSamples=0;
 
   while(getline(datafile,line))
     {
       if(line.at(0)!='#')
-	{
-	  try
-	    {
-	      series.push_back(atof(line.c_str()));
-	      ++numSamples;
-	    }
-	  catch (std::exception& e)
-	    {
-	      break;
-	    }
-	}
+        {
+          try
+            {
+              series.push_back(atof(line.c_str()));
+              ++numSamples;
+            }
+          catch (std::exception& e)
+            {
+              break;
+            }
+        }
     }
 
   return(series);
@@ -367,27 +356,23 @@ double leastsquares(const std::vector<double>& x, const std::vector<double>& y)
     double s_xy = inner_product(x.begin(), x.end(), y.begin(), 0.0);
     double m=(n * s_xy - s_x * s_y) / (n * s_xx - s_x * s_x);
     double b=(s_y-m*s_x)/n;
-    
+
     std::cout << "#m " << m << std::endl;
     std::cout << "#b " << b << std::endl;
     return(b);
 }
 
-//  fit y_i=f(x_i) to y=A.exp(-bx)
-//  ln y = ln A - bx
-// return A
-
 double exp_fit_linearregression(const std::vector<double>& x, const std::vector<double>& y)
 {
   std::vector<double> lny;
   int n=x.size();
-  
+
   for(int i=0;i<x.size();++i)
     {
       lny.push_back(log(y[i]));
     }
   double intercept=leastsquares(x, lny);
-  
+
   return(exp(intercept));
 }
 
@@ -406,22 +391,22 @@ int main(int argc, char *argv[])
   double k=10.0*4.184*1000;
   double varVelAnalytical;
   double varVel;
-  double cutoff; 
+  double cutoff;
 
   timestep=1.0;
   varAnalytical=8.314*298.15/k;
   varVelAnalytical=8.314*298.15/(18.01/1000.0)*1E-10;
 
   po::options_description desc("Allowed options");
-  
+
   desc.add_options()
     ("help,h", "produce help message")
     ("input,i", po::value<std::string>()->required(), "file name of time series")
-    ("type,t", po::value<std::string>()->required(), "type of time series (namd, charmm, gromacs, amber, txt)")
-    ("cutoff,c", po::value<double>()->default_value(INTCUTOFF), "cutoff to integrate ACF")  
+    ("type,t", po::value<std::string>(), "type of time series (namd, charmm, gromacs, amber, txt)")
+    ("cutoff,c", po::value<double>()->default_value(INTCUTOFF), "cutoff to integrate ACF")
     ("acf,a", po::value<std::string>()->required(), "file name to save autocorrelation functions in")
     ("output,o", po::value<std::string>()->required(), "file name to save output to")
-    ("timestep,ts", po::value<double>(&timestep)->default_value(DEFAULT_TIMESTEP), "time between samples in time series file (fs)")
+    ("timestep,s", po::value<double>(&timestep)->default_value(DEFAULT_TIMESTEP), "time between samples in time series file (fs)")
     ("maxcorr,m", po::value<int>(&nCorr)->default_value(DEFAULT_MAXCORR), "maximum number of time steps to calculate correlation functions over")
     ("field,f", po::value<int>(&field)->default_value(1), "index of field to read from time series file")
     ;
@@ -433,95 +418,94 @@ int main(int argc, char *argv[])
       po::notify(vm);
 
       if (vm.count("help"))
-	{
-	  std::cout << desc << "\n";
-	  return 1;
-	}
-      
+        {
+          std::cout << desc << "\n";
+          return 1;
+        }
+
       if (vm.count("input"))
-	{
-	  const std::string fname_str=vm["input"].as<std::string>();
-	  fname = new char [fname_str.length()+1];
-	  std::strcpy(fname, fname_str.c_str());
-	}
+        {
+          const std::string fname_str=vm["input"].as<std::string>();
+          fname = new char [fname_str.length()+1];
+          std::strcpy(fname, fname_str.c_str());
+        }
       else
-	{
-	  std::cout << "Time series file must be provided" << std::endl;
-	  return(1);
-	}
-	
+        {
+          std::cout << "Time series file must be provided" << std::endl;
+          return(1);
+        }
+
      if(vm.count("type"))
         {
-	  const std::string type_str=vm["type"].as<std::string>();
-	  type=new char [type_str.length()+1];
-	  std::strcpy(type, type_str.c_str());
+          const std::string type_str=vm["type"].as<std::string>();
+          type=new char [type_str.length()+1];
+          std::strcpy(type, type_str.c_str());
         }
 
       else
       {
-	  std::cout<<"Type of file not provided"<<std::endl;
+          std::cout<<"Type of file not provided"<<std::endl;
       }
-      
+
       if (vm.count("acf"))
-	{
-	  const std::string acf_fname_str=vm["acf"].as<std::string>();
-	  acf_fname = new char [acf_fname_str.length()+1];
-	  std::strcpy(acf_fname, acf_fname_str.c_str());
-	  write_acf=true;
-	}
+        {
+          const std::string acf_fname_str=vm["acf"].as<std::string>();
+          acf_fname = new char [acf_fname_str.length()+1];
+          std::strcpy(acf_fname, acf_fname_str.c_str());
+          write_acf=true;
+        }
       else
-	{
-	  std::cout << "#ACF will not be saved" << std::endl;
-	  write_acf=false;
-	}
+        {
+          std::cout << "#ACF will not be saved" << std::endl;
+          write_acf=false;
+        }
 
       if (vm.count("timestep"))
-	{
-	  timestep=vm["timestep"].as<double>();
-	  std::cout << "#Time step of " << timestep << " fs will be used." << std::endl;
-	}
+        {
+          timestep=vm["timestep"].as<double>();
+          std::cout << "#Time step of " << timestep << " fs will be used." << std::endl;
+        }
       else
-	{
-	  timestep=DEFAULT_TIMESTEP;
-	  std::cout << "#Default timestep of " << std::endl;
-	}
-	
+        {
+          timestep=DEFAULT_TIMESTEP;
+          std::cout << "#Default timestep of " << std::endl;
+        }
+
       if(vm.count("cutoff"))
       {
-	  cutoff=vm["cutoff"].as<double>();
-	  std::cout<<"#Cutoff of "<<cutoff<<" will be used."<<std::endl;
+          cutoff=vm["cutoff"].as<double>();
+          std::cout<<"#Cutoff of "<<cutoff<<" will be used."<<std::endl;
       }
       else
       {
-	  cutoff=INTCUTOFF;
-	  std::cout<<"Default cutoff of "<<cutoff<<" will be used."<<std::endl;
+          cutoff=INTCUTOFF;
+          std::cout<<"Default cutoff of "<<cutoff<<" will be used."<<std::endl;
       }
 
       if (vm.count("output"))
-	{
-	  const std::string output_fname_str=vm["output"].as<std::string>();
-	  output_fname = new char [output_fname_str.length()+1];
-	  std::strcpy(output_fname, output_fname_str.c_str());
-	  std::cout << "#D(s) will be saved in " << output_fname << std::endl;
-	}
+        {
+          const std::string output_fname_str=vm["output"].as<std::string>();
+          output_fname = new char [output_fname_str.length()+1];
+          std::strcpy(output_fname, output_fname_str.c_str());
+          std::cout << "#D(s) will be saved in " << output_fname << std::endl;
+        }
       else
-	{
-	  std::cout << "#D(s) will not be saved" << std::endl;
-	}
+        {
+          std::cout << "#D(s) will not be saved" << std::endl;
+        }
     }
   catch ( const std::exception& e )
     {
       std::cerr << e.what() << std::endl;
       return 1;
     }
-  
-  
+
   series=readSeriesNAMD(fname, numSamples, field);
   timeSeries=&series[0];
 
   subtract_average(timeSeries, numSamples);
   velSeries=velocity_series(timeSeries, numSamples, timestep);
-  
+
   numSamples=numSamples-2;
 
   acf=calcCorrelation(timeSeries, numSamples, nCorr);
@@ -533,27 +517,28 @@ int main(int argc, char *argv[])
   if(write_acf)
     {
       std::ofstream acf_file(acf_fname);
-      
+
       for(int i=0;i<nCorr;++i)
-	acf_file << i << " " << acf[i] << " " << vacf[i] << std::endl;
-  
+        acf_file << i << " " << acf[i] << " " << vacf[i] << std::endl;
+
       acf_file.close();
     }
-  
+
   I=integrateCorr(acf, nCorr, timestep);
-  
-  std::cout << "#" << var << std::endl;
-  std::cout << "#varVel " << varVel << std::endl;
-  std::cout << "#varVelAnalytical " << varVelAnalytical << std::endl;
-  std::cout << "#nCorr " << nCorr << std::endl;
-  std::cout << "#cutoff" << cutoff << std::endl;
-  
-  double s=0.0001;
+
   std::ofstream out_file(output_fname,  std::ofstream::out);
   std::cout << "#output " << output_fname << std::endl;
 
+  out_file << "#var " << var << std::endl;
+  out_file << "#varVel " << varVel << std::endl;
+  out_file << "#varVelAnalytical " << varVelAnalytical << std::endl;
+  out_file << "#nCorr " << nCorr << std::endl;
+
+  double s=0.0001;
+
   double s_min_num=1000;
   double s_min_loc=-1.0;
+  out_file << std::setw(15) << std::left << "s"<< std::setw(15) << std::left <<"Ds" << std::setw(15) << std::left << "laplaceVACF" << std::setw(15) << std::left << "Ds numerator" << std::setw(15) << std::left << "Ds denominator" << std::endl;
   while(s<=1.0)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
@@ -561,49 +546,52 @@ int main(int argc, char *argv[])
       double Ds=-(laplaceVACF*var*varVel)/denom;
 
       if(denom<s_min_num)
-	{
-	  s_min_num=denom;
-	  s_min_loc=s;
-	}
-      out_file << s << " " <<  Ds << " " << laplaceVACF <<  " " << -(laplaceVACF*var*varVel) << " " << 1.0/(laplaceVACF*(s*var+varVel/s)-var*varVel) << " " << (laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
+        {
+          s_min_num=denom;
+          s_min_loc=s;
+        }
+
+      out_file << std::setw(15) << std::left << s<< std::setw(15) << std::left <<  Ds << std::setw(15) << std::left << laplaceVACF << std::setw(15)<< std::left << -(laplaceVACF*var*varVel) << std::setw(15) << std::left << (laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
       s=s+0.0001;
     }
-  out_file.close();
-  
-  // Step 1: Find value of s where denominator is a minimum(laplaceVACF*(s*var+varVel/s)-var*varVel)
-  typedef std::pair<double, double> S_pair;
-  double s_lower=0.000001;
-  double s_upper=1.0;
-  S_pair s_min_pair=boost::math::tools::brent_find_minima(denom, s_lower, s_upper, 50);
-  double s_min=s_min_pair.first;
-
 
   // find singularity numerically
   s=0.0001;
-  
+
   double root=1.0;
   double root_loc=s_min_loc;
-  
+  double s2=0.0;
+  double root_two=0.0;
+  int both = 0;
+
   while(s<=0.1)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
       double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
-      std::cout << "#root "<< s << " " << denom << std::endl;
       if(abs(denom)<root)
-	{
-	  root=abs(denom);
-	  root_loc=s;
-	}
-      if(denom<0)
-	break;
+        {
+          root=abs(denom);
+          root_loc=s;
+        }
+      if(denom<0 && both ==0)
+        {
+          s2=s;
+          both++;
+        }
+
+      if(denom>0 && both==1)
+        break;
+
       s=s+0.00001;
     }
-  root_loc=s;
-  
+  root_loc=s2;
+  root_two = s;
+
   double Ds=1.0;
   double Ds_prev=1.0;
 
-  std::cout << "#root " << root_loc << std::endl;
+  out_file << "#root " << root_loc << std::endl;
+  out_file << "#2nd singularity "<< s<< std::endl;
 
   // Find minima of Ds after root
   s=root_loc;
@@ -613,37 +601,32 @@ int main(int argc, char *argv[])
       double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
       Ds_prev=Ds;
       Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
-      std::cout << "# s "<< s << " Ds_prev " << Ds_prev << " " << Ds << std::endl;
       if(Ds>Ds_prev)
-	{
-	  break;
-	}
+        {
+          break;
+        }
       s=s+0.00001;
     }
-  
+
   double Ds_min=s;
+
+  out_file << "Ds_min " << Ds_min << std::endl;
   
-  //  std::cout << "#s_min = " << s_min << " "  << root_loc << " " << s_min_loc << std::endl;
-  //s_lower=s_min;
-  //s_upper=1.0;
-  //  S_pair Ds_min_pair=boost::math::tools::brent_find_minima(Ds, s_lower, s_upper, 50);
-  //  double Ds_min=Ds_min_pair.first;
-  std::cout << "Ds_min " << Ds_min << std::endl;
-  // Step2: calculate s over range of [2*s_min, 4*s_min]
-  
-  s=3*Ds_min;
-  
-  double s_delta=1.0*Ds_min/100; // calculate D(s) at 100 points betewen 3 s_min and 4 s_min
-  
+  // Step2: calculate s over range
+  s = (root_two - Ds_min)/3.3;
+  double s_max = (root_two - Ds_min)/2.4;
+
+  double s_delta=1.0*(s_max - s)/100; // calculate D(s) at 100 point
   std::vector<double> s_values;
   std::vector<double> intDs;
-  
-  while(s<=4*Ds_min)
+
+  out_file << std::setw(15) << std::left << "s"<< std::setw(15) << std::left <<"Ds" << std::setw(15) << std::left << "laplaceVACF" << std::setw(15) << std::left << "Ds numerator" << std::setw(15) << std::left << "Ds denominator" << std::endl;
+  while(s<=s_max)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
       double Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
       double logDs=log(Ds);
-      std::cout << s << " " <<  Ds << " " << laplaceVACF <<  " " << -(laplaceVACF*var*varVel) << " " << 1.0/(laplaceVACF*(s*var+varVel/s)-var*varVel) << " " << (laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
+      out_file << std::setw(15) << std::left << s<< std::setw(15) << std::left <<  Ds << std::setw(15) << std::left << laplaceVACF << std::setw(15)<< std::left << -(laplaceVACF*var*varVel) << std::setw(15) << std::left << (laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
       s_values.push_back(s);
       intDs.push_back(Ds);
       s=s+s_delta;
@@ -654,14 +637,17 @@ int main(int argc, char *argv[])
 
   for(int i=0;i<2;++i)
     {
-      std::cout << "#P " << i << " " << P[i] << std::endl;
+      out_file << "#P " << i << " " << P[i] << std::endl;
     }
- 
-  std::cout << "#I = " << I << std::endl;
-  std::cout << "#var = " << var << std::endl;
-  std::cout << "#D = " << var*var/I << " A2/fs " << std::endl;
-  std::cout << "#D = " << var*var/I*0.1 << " cm2/s " << std::endl;
-  std::cout << "#Ds= " << P[0]*0.1 << " cm2/s " << std::endl;
+
+  out_file << "#I = " << I << std::endl;
+  out_file << "#var = " << var << std::endl;
+  out_file << "#D = " << var*var/I << " A2/fs " << std::endl;
+  out_file << "#D = " << var*var/I*0.1 << " cm2/s " << std::endl;
+  out_file << "#Ds= " << P[0]*0.1 << " cm2/s " << std::endl;
+  std::cout<<"Finished! \n";
+
+  out_file.close();
 
   delete[] acf;
   delete[] vacf;
