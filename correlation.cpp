@@ -645,7 +645,7 @@ int main(int argc, char *argv[])
     }
   else if(type=gromacs)
     {
-      series=readSeriesGROMACS(fname, numSamples, field);
+      series=readSeriesGROMACS(fname, numSamples);
     }
   else
     {
