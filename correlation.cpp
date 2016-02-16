@@ -23,6 +23,11 @@ using boost::math::tools::toms748_solve;
 #define INTCUTOFF 0.05
 #define DEFAULT_MAXCORR 1000
 #define DEFAULT_TIMESTEP 1
+#define SEG_MIN 0.2
+#define R2_THRESHOLD 0.9999
+#define NSEGBINS 10
+
+#define LINEAR_BINS 10 // define range into bins
 
 /* compile: g++ correlation.cpp -o correlation */
 
@@ -169,7 +174,14 @@ double bisect(double lower, double upper)
   return(mid);
 }
 
-/* Allen, M.; Tildesley, D. Computer Simulation of Liquids; Oxford Science Publications, Clarendon Press: Oxford, 1989. */
+// Calculate correlation function by direct summation
+
+//
+// Allen, M.; Tildesley, D. Computer Simulation of Liquids; Oxford Science Publications, Clarendon Press: Oxford, 1989. 
+// @y time series
+// @nSamples number of data points in time series
+// @nCorr length of correlation function to calculate
+// @return pointer to double array containing correlation function
 
 double *calcCorrelation(double *y, int nSamples, int nCorr)
 {
@@ -345,21 +357,124 @@ std::vector<double> readSeriesRaw(char *fname, int &numSamples)
   return(series);
 }
 
+// read time series from GROMACS file fname
+// // store the number of points in numSamples
+// // each line should store one time step
+//
+
+std::vector<double> readSeriesGROMACS(char *fname, int &numSamples)
+{
+  std::ifstream datafile(fname, std::ifstream::in);
+  std::vector<double> series;
+  double *timeSeries;
+  int i=0;
+  std::string line;
+  std::string item;
+  std::istringstream iss;
+  
+  numSamples=0;
+  
+  while(getline(datafile,line))
+    {
+      if(line.at(0)!='#'|| line.at(0)!='@')
+	{
+	  try
+	    {
+	      while(getline(iss,item,' '))
+		{
+		  series.push_back(atof(item.c_str()));
+		}
+	      ++numSamples;
+	    }
+	  catch (std::exception& e)
+	    {
+	      break;
+	    }
+	}
+    }
+  
+  return(series);
+}
+
 // calculates intercept by linear interpolation
 
 double leastsquares(const std::vector<double>& x, const std::vector<double>& y)
 {
     int n=x.size();
-    double s_x  = accumulate(x.begin(), x.end(), 0.0);
+    double s_x  = accumulate(x.begin(), x.begin(), 0.0);
     double s_y  = accumulate(y.begin(), y.end(), 0.0);
     double s_xx = inner_product(x.begin(), x.end(), x.begin(), 0.0);
     double s_xy = inner_product(x.begin(), x.end(), y.begin(), 0.0);
     double m=(n * s_xy - s_x * s_y) / (n * s_xx - s_x * s_x);
     double b=(s_y-m*s_x)/n;
 
-    std::cout << "#m " << m << std::endl;
-    std::cout << "#b " << b << std::endl;
     return(b);
+}
+
+// calculates intercept by linear interpolation for subset of D(s)
+
+double leastsquares_subset(const std::vector<double>& x, const  std::vector<double>& y, int lower, int upper, double &m, double &b, double &r2)
+{
+  int n=upper-lower;
+  double s_x  = accumulate(x.begin()+lower, x.begin()+upper, 0.0);
+  double s_y  = accumulate(y.begin()+lower, y.begin()+upper, 0.0);
+
+  double s_xx = inner_product(x.begin()+lower, x.begin()+upper, x.begin()+lower, 0.0);
+  double s_xy = inner_product(x.begin()+lower, x.begin()+upper, y.begin()+lower, 0.0);
+  double s_yy = inner_product(y.begin()+lower, y.begin()+upper, y.begin()+lower, 0.0);
+ 
+  m=(n * s_xy - s_x * s_y) / (n * s_xx - s_x * s_x);
+  b=(s_y-m*s_x)/n;
+  // calculate residuals, use to set r2
+  double resSum=0.0;
+  
+  for(int i=lower;i<upper;++i)
+    {
+      double res=y.at(i)-(m*x.at(i)+b);
+      resSum+=res*res;
+    }
+  r2=1.0-resSum/s_yy;
+
+  return(b); 
+}
+
+// iteratively finds linear segment of D(s)
+// trims front or back percentage
+// stops when r2 is > 0.99 or length is now less than SEG_MIN fraction
+
+void find_linear_range(std::vector<double>& s, std::vector<double>& Ds, int &lower, int &upper)
+{
+  double m, b, r2=0.0;
+  int min_length=(upper-lower)*SEG_MIN;
+  
+  do
+    {
+      leastsquares_subset(s, Ds, lower, upper, m, b, r2);
+      
+      int delete_length=(upper-lower)*0.05;
+      
+      double mM=0.0, bM=0.0, r2M=0.0;
+      leastsquares_subset(s, Ds, lower+delete_length, upper-delete_length, mM, bM, r2M);
+
+      double mF=0.0, bF=0.0, r2F=0;
+      leastsquares_subset(s, Ds, lower, lower+delete_length, mF, bF, r2F);
+
+      double mB=0.0, bB=0.0, r2B=0.0;
+      leastsquares_subset(s, Ds, upper-delete_length, upper, mB, bB, r2B);
+
+      // test which section to delete.  Delete the least linear segment
+      if(fabs(r2B) < fabs(r2F))
+	{
+	  // the front is closer to the middle than the back. delete the back segment
+	  upper-=delete_length;
+	}
+      else
+	{
+	  // the back is closer to the middle than the front. delete the front segment
+	  lower+=delete_length;
+	}
+    }
+  while(r2<R2_THRESHOLD && (upper-lower)>min_length);
 }
 
 double exp_fit_linearregression(const std::vector<double>& x, const std::vector<double>& y)
@@ -376,14 +491,36 @@ double exp_fit_linearregression(const std::vector<double>& x, const std::vector<
   return(exp(intercept));
 }
 
+// searches backwards from second singularity until line tangent
+// to the curve would give a non-negative intercept
+
+int find_negative_bound(const std::vector<double>& x, const std::vector<double>& y)
+{
+  for(int i=x.size()-2;i>0;--i)
+    {
+      double slope=(y[i+1]-y[i])/(x[i+1]-x[i]);
+      double intercept=y[i]-slope*x[i];
+
+      if(intercept>0)
+	{
+	  return(i);
+	}
+    }
+  // search  didn't work for some  reason, do not shrink area
+  return(x.size());
+}
+
 int main(int argc, char *argv[])
 {
+  enum InputType {gromacs, namd, raw};
+  InputType  type;
+  
   bool write_acf;
   std::vector<double> series, seriesVel;
   double *velSeries;
   double *acf, *timeSeries;
   double I;
-  char *fname, *acf_fname, *output_fname, *type;
+  char *fname, *acf_fname, *output_fname;
   double var_m2;
   int field=1;
   int numSamples;
@@ -419,7 +556,6 @@ int main(int argc, char *argv[])
 
       if (vm.count("help"))
         {
-          std::cout << desc << "\n";
           return 1;
         }
 
@@ -438,14 +574,17 @@ int main(int argc, char *argv[])
      if(vm.count("type"))
         {
           const std::string type_str=vm["type"].as<std::string>();
-          type=new char [type_str.length()+1];
-          std::strcpy(type, type_str.c_str());
-        }
-
-      else
-      {
-          std::cout<<"Type of file not provided"<<std::endl;
-      }
+	  if(type_str.compare("gromacs"))
+	    type=gromacs;
+	  else if(type_str.compare("raw"))
+	    type=raw;
+	  else 
+	    type=namd;
+	}
+     else
+       {
+	 std::cout<<"Type of file not provided"<<std::endl;
+       }
 
       if (vm.count("acf"))
         {
@@ -500,7 +639,18 @@ int main(int argc, char *argv[])
       return 1;
     }
 
-  series=readSeriesNAMD(fname, numSamples, field);
+  if(type==namd)
+    { 
+      series=readSeriesNAMD(fname, numSamples, field);
+    }
+  else if(type=gromacs)
+    {
+      series=readSeriesGROMACS(fname, numSamples, field);
+    }
+  else
+    {
+      series=readSeriesRaw(fname, numSamples);
+    }
   timeSeries=&series[0];
 
   subtract_average(timeSeries, numSamples);
@@ -538,7 +688,8 @@ int main(int argc, char *argv[])
 
   double s_min_num=1000;
   double s_min_loc=-1.0;
-  out_file << std::setw(15) << std::left << "s"<< std::setw(15) << std::left <<"Ds" << std::setw(15) << std::left << "laplaceVACF" << std::setw(15) << std::left << "Ds numerator" << std::setw(15) << std::left << "Ds denominator" << std::endl;
+  out_file << "#" << std::setw(15) << std::left << "s"<< std::setw(15) << std::left <<"Ds" << std::setw(15) << std::left << "laplaceVACF" << std::setw(15) << std::left << "Ds numerator" << std::setw(15) << std::left << "Ds denominator" << std::endl;
+
   while(s<=1.0)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
@@ -559,8 +710,8 @@ int main(int argc, char *argv[])
   s=0.0001;
 
   double root=1.0;
-  double root_loc=s_min_loc;
   double s2=0.0;
+  double root_one=s_min_loc;
   double root_two=0.0;
   int both = 0;
 
@@ -568,34 +719,40 @@ int main(int argc, char *argv[])
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
       double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
-      if(abs(denom)<root)
+      if(denom<0)
         {
-          root=abs(denom);
-          root_loc=s;
+          root=denom;
+          root_one=s;
+	  break;
         }
-      if(denom<0 && both ==0)
-        {
-          s2=s;
-          both++;
-        }
-
-      if(denom>0 && both==1)
-        break;
-
-      s=s+0.00001;
+      s=s+0.0001;
     }
-  root_loc=s2;
-  root_two = s;
 
+  // find second singularity
+  // occurs when denominator becomes positive again
+  while(s<=1.0)
+    {
+      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
+      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
+
+      if(denom>0)
+        {
+	  root_two=s;
+	  break;
+        }
+
+      s=s+0.0001;
+    }
+  
   double Ds=1.0;
   double Ds_prev=1.0;
+  
+  out_file << "#1st singularity " << root_one << std::endl;
+  out_file << "#2nd singularity "<< root_two << std::endl;
 
-  out_file << "#root " << root_loc << std::endl;
-  out_file << "#2nd singularity "<< s<< std::endl;
-
-  // Find minima of Ds after root
-  s=root_loc;
-  while(s<=1.0)
+  // find minimum in Ds between first and second signularities
+  s=root_one;
+  while(s<=root_two)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
       double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
@@ -610,17 +767,26 @@ int main(int argc, char *argv[])
 
   double Ds_min=s;
 
-  out_file << "Ds_min " << Ds_min << std::endl;
+  out_file << "#Ds_min " << Ds_min << std::endl;
   
   // Step2: calculate s over range
-  s = (root_two - Ds_min)/3.3;
-  double s_max = (root_two - Ds_min)/2.4;
+  //  s = (root_two - Ds_min)/3.3;
+  //  double s_max = (root_two - Ds_min)/2.4;
+  //  double s_delta=1.0*(s_max - s)/100; // calculate D(s) at 100 point
 
-  double s_delta=1.0*(s_max - s)/100; // calculate D(s) at 100 point
+  double s_range=root_two-Ds_min;
+  double s_min=Ds_min;
+  double s_max=root_two;
+  
+  //  double s_max=Ds_min+s_range*0.4;
+  //  double s_max=(root_two - Ds_min)/2.4;
+  s=s_min;
+  double s_delta=s_range/1000;
+  
   std::vector<double> s_values;
   std::vector<double> intDs;
 
-  out_file << std::setw(15) << std::left << "s"<< std::setw(15) << std::left <<"Ds" << std::setw(15) << std::left << "laplaceVACF" << std::setw(15) << std::left << "Ds numerator" << std::setw(15) << std::left << "Ds denominator" << std::endl;
+  out_file << std::setw(15) << std::left << "#s"<< std::setw(15) << std::left <<"Ds" << std::setw(15) << std::left << "laplaceVACF" << std::setw(15) << std::left << "Ds numerator" << std::setw(15) << std::left << "Ds denominator" << std::endl;
   while(s<=s_max)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
@@ -631,21 +797,23 @@ int main(int argc, char *argv[])
       intDs.push_back(Ds);
       s=s+s_delta;
     }
-
+  
+  int upper=find_negative_bound(s_values, intDs);
+  int lower=0;
+  
+  find_linear_range(s_values, intDs, lower, upper);
+  
   // Step 3
-  std::vector<double> P=polyfit(s_values, intDs, 1);
-
-  for(int i=0;i<2;++i)
-    {
-      out_file << "#P " << i << " " << P[i] << std::endl;
-    }
+  double m, b, r2;
+  
+  leastsquares_subset(s_values, intDs, lower, upper, m, b, r2);
 
   out_file << "#I = " << I << std::endl;
   out_file << "#var = " << var << std::endl;
   out_file << "#D = " << var*var/I << " A2/fs " << std::endl;
   out_file << "#D = " << var*var/I*0.1 << " cm2/s " << std::endl;
-  out_file << "#Ds= " << P[0]*0.1 << " cm2/s " << std::endl;
-  std::cout<<"Finished! \n";
+
+  out_file << "#Ds (sub)= " << b*0.1 << " cm2/s " << std::endl;
 
   out_file.close();
 
