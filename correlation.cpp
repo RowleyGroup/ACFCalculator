@@ -510,10 +510,60 @@ int find_negative_bound(const std::vector<double>& x, const std::vector<double>&
   return(x.size());
 }
 
+std::vector<double> diff(const std::vector<double>& x, const std::vector<double>& y)
+{
+  std::vector<double> df;
+
+  double init_slope1=(y.at(1)-y.at(0))/(x.at(1)-x.at(0));
+  double init_slope2=(y.at(2)-y.at(1))/(x.at(2)-x.at(1));
+  
+  df.push_back( init_slope1-(init_slope2-init_slope1));
+  
+  for(int i=0;i<y.size()-1;++i)
+    {
+      df.push_back( (y.at(i+1)-y.at(i))/(x.at(i+1)-x.at(i)) );
+    }
+
+  return(df);
+}
+
+int findmin(const std::vector<double>& y)
+{
+  int min=0;
+  double minval=fabs(y.at(0));
+  
+  for(int i=0;i<y.size();++i)
+    {
+      if(fabs(y.at(i))<minval)
+	{
+	  min=i;
+	  minval=fabs(y.at(i));
+	}
+    }
+  return(min);
+}
+
+// return 5 pt running average
+
+std::vector<double> smooth(const std::vector<double>& y)
+{
+  std::vector<double> ySmooth;
+  ySmooth.push_back( (y.at(0) + y.at(1) + y.at(2))/3.0);
+  ySmooth.push_back( (y.at(0) + y.at(1) + y.at(2) + y.at(3))/4.0);
+	      
+  for(int i=2;i<y.size()-2;++i)
+    {
+      ySmooth.push_back( (y.at(i-2) + y.at(i-1) + y.at(i) + y.at(i+1) + y.at(i+2))/5.0);
+    }
+  ySmooth.push_back(y.at(y.size()-1));
+  ySmooth.push_back(y.at(y.size()-2));
+  return(ySmooth);
+}
+
 int main(int argc, char *argv[])
 {
   enum InputType {gromacs, namd, raw};
-  InputType  type;
+  InputType  type=namd;
   
   bool write_acf;
   std::vector<double> series, seriesVel;
@@ -574,12 +624,19 @@ int main(int argc, char *argv[])
      if(vm.count("type"))
         {
           const std::string type_str=vm["type"].as<std::string>();
-	  if(type_str.compare("gromacs"))
-	    type=gromacs;
-	  else if(type_str.compare("raw"))
-	    type=raw;
-	  else 
-	    type=namd;
+	  if(type_str.compare("gromacs")==0)
+	    {
+	      type=gromacs;
+	    }
+	  else if(type_str.compare("raw")==0)
+	    {
+	      type=raw;
+	    }
+	  else
+	    {
+	      type=namd;
+	      std::cout << "#NAMD format" << std::endl;
+	    }
 	}
      else
        {
@@ -773,14 +830,14 @@ int main(int argc, char *argv[])
   //  s = (root_two - Ds_min)/3.3;
   //  double s_max = (root_two - Ds_min)/2.4;
   //  double s_delta=1.0*(s_max - s)/100; // calculate D(s) at 100 point
-
+  //  Ds_min*=1.2;
   double s_range=root_two-Ds_min;
   double s_min=Ds_min;
   double s_max=root_two;
   
   //  double s_max=Ds_min+s_range*0.4;
   //  double s_max=(root_two - Ds_min)/2.4;
-  s=s_min;
+
   double s_delta=s_range/1000;
   
   std::vector<double> s_values;
@@ -801,18 +858,65 @@ int main(int argc, char *argv[])
   int upper=find_negative_bound(s_values, intDs);
   int lower=0;
   
-  find_linear_range(s_values, intDs, lower, upper);
+  //  find_linear_range(s_values, intDs, lower, upper);
   
   // Step 3
   double m, b, r2;
   
+  //  leastsquares_subset(s_values, intDs, lower, upper, m, b, r2);
+  std::vector<double> df=diff(s_values, intDs);
+  std::vector<double> df_smooth=smooth(df);
+  
+  std::vector<double> ddf=diff(s_values, df);
+  std::vector<double> ddf_smooth=smooth(ddf);
+
+  for(int i=0;i<ddf_smooth.size();++i)
+    {
+      std::cout << s_values.at(i) << " " << df.at(i) << " " << df_smooth.at(i) << " " << ddf.at(i) << " " << ddf_smooth.at(i) << std::endl;
+    }
+
+  int min_ddf=findmin(ddf_smooth);
+  std::cout << "#min " << min_ddf << std::endl;
+  
+  while(ddf_smooth.at(lower)>ddf_smooth.at(min_ddf)*2.0 && lower<ddf_smooth.size()-1)
+    {
+      ++lower;
+    }
+  std::cout << "#lower " << lower <<  std::endl;
+  upper=lower+1;
+  while(ddf_smooth.at(upper)<ddf_smooth.at(min_ddf)*3.0 && upper < ddf_smooth.size()-1)
+    {
+      ++upper;
+    }
+  
+  std::cout << "#lower " << lower << " upper " <<  upper << std::endl;
+  std::cout << "#lower_s " << s_values.at(lower) << " upper_s " <<  s_values.at(upper) << std::endl;
+  
   leastsquares_subset(s_values, intDs, lower, upper, m, b, r2);
 
+  std::vector<double> s_values_poly;
+  std::vector<double> intDs_poly;
+
+  s=s_values.at(lower);
+  s_max=s_values.at(upper);
+  s_delta=(s_max-s)/100.0;
+  
+  while(s<=s_max)
+    {
+      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
+      double Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
+      s_values_poly.push_back(s);
+      intDs_poly.push_back(Ds);
+      s=s+s_delta;
+    }
+  
+  std::vector<double> P=polyfit(s_values_poly, intDs_poly, 2);
+  
   out_file << "#I = " << I << std::endl;
   out_file << "#var = " << var << std::endl;
   out_file << "#D = " << var*var/I << " A2/fs " << std::endl;
   out_file << "#D = " << var*var/I*0.1 << " cm2/s " << std::endl;
-
+  out_file << "#Ds (poly)= " << P[0]*0.1 << " cm2/s " << std::endl;
   out_file << "#Ds (sub)= " << b*0.1 << " cm2/s " << std::endl;
 
   out_file.close();
