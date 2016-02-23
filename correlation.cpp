@@ -24,92 +24,34 @@ using boost::math::tools::toms748_solve;
 #define DEFAULT_MAXCORR 1000
 #define DEFAULT_TIMESTEP 1
 #define SEG_MIN 0.2
-#define R2_THRESHOLD 0.9999
-#define NSEGBINS 10
 
 #define LINEAR_BINS 10 // define range into bins
 
-/* compile: g++ correlation.cpp -o correlation */
+// compile: g++ correlation.cpp -o correlation 
 
-/* syntax: ./correlation time-series.traj 
+// syntax: ./correlation time-series.traj 
 
-/* the time series is assumed to be in the format saved by the NAMD colvars module */
+// the time series is assumed to be in the format saved by the NAMD colvars module 
 
-/* calculate diffusion coefficient of a harmonically-restrained degree of freedom by */
-/* calculating the autocorrelation function a time series of a molecular dynamics */
-/* simulation then integrating it */
+// calculate diffusion coefficient of a harmonically-restrained degree of freedom by 
+// calculating the autocorrelation function a time series of a molecular dynamics 
+// simulation then integrating it 
 
-/* Hummer, G. Position-dependent diffusion coefficients and free energies from Bayesian
-  analysis of equilibrium and replica molecular dynamics simulations. New J. Phys. 2005,
-  7, 34. */
+// Hummer, G. Position-dependent diffusion coefficients and free energies from Bayesian
+// analysis of equilibrium and replica molecular dynamics simulations. New J. Phys. 2005,
+// 7, 34. 
 
-/* internal units:
-distance = angstrom
-time = femptoseconds
-velocity = Angstrom / femptoseconds
-*/
+// internal units:
+// distance = angstrom
+// time = femptoseconds
+// velocity = Angstrom / femptoseconds
 
 namespace po = boost::program_options;
-
-// http://vilipetek.com/2013/10/07/polynomial-fitting-in-c-using-boost/
-
-std::vector<double> polyfit( const std::vector<double>& oX,
-                        const std::vector<double>& oY, int nDegree )
-{
-  using namespace boost::numeric::ublas;
-
-  if ( oX.size() != oY.size() )
-    throw std::invalid_argument( "X and Y vector sizes do not match" );
-
-  // more intuative this way
-  nDegree++;
-
-  size_t nCount =  oX.size();
-  matrix<double> oXMatrix( nCount, nDegree );
-  matrix<double> oYMatrix( nCount, 1 );
-
-  // copy y matrix
-  for ( size_t i = 0; i < nCount; i++ )
-    {
-      oYMatrix(i, 0) = oY[i];
-    }
-
-  // create the X matrix
-  for ( size_t nRow = 0; nRow < nCount; nRow++ )
-    {
-      double nVal = 1.0f;
-      for ( int nCol = 0; nCol < nDegree; nCol++ )
-        {
-          oXMatrix(nRow, nCol) = nVal;
-          nVal *= oX[nRow];
-        }
-    }
-
-  // transpose X matrix
-  matrix<double> oXtMatrix( trans(oXMatrix) );
-  // multiply transposed X matrix with X matrix
-  matrix<double> oXtXMatrix( prec_prod(oXtMatrix, oXMatrix) );
-  // multiply transposed X matrix with Y matrix
-  matrix<double> oXtYMatrix( prec_prod(oXtMatrix, oYMatrix) );
-
-  // lu decomposition
-  permutation_matrix<int> pert(oXtXMatrix.size1());
-  const std::size_t singular = lu_factorize(oXtXMatrix, pert);
-  // must be singular
-  BOOST_ASSERT( singular == 0 );
-
-  // backsubstitution
-  lu_substitute(oXtXMatrix, pert, oXtYMatrix);
-
-  // copy the result to coeff
-  return std::vector<double>( oXtYMatrix.data().begin(), oXtYMatrix.data().end() );
-}
 
 double *vacf;
 int nCorr;
 double var;
 double varVel;
-double timestep;
 
 template <typename T> int sgn(T val) {
     return (T(0) < val) - (val < T(0));
@@ -123,55 +65,23 @@ double laplace(double *series, double timestep, double s, int length)
     {
       F+=exp(-s*i*timestep)*series[i]*timestep;
     }
+
   return(F);
 }
 
 
-double denom(double s)
+double denom(double s, double timestep)
 {
   double laplaceVACF=laplace(vacf, timestep, s, nCorr);
   double f=laplaceVACF*(s*var+varVel/s)-var*varVel;
   return(f);
 }
 
-double Ds(double s)
+double Ds(double s, double timestep)
 {
   double laplaceVACF=laplace(vacf, timestep, s, nCorr);
   double f=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
   return(f);
-}
-
-double bisect(double lower, double upper)
-{
-  int it=0;
-  double fa=denom(lower);
-  double fb=denom(upper);
-  double fmid=0.0;
-  double mid;
-
-  while(it<1000)
-    {
-      mid=(lower+upper)/2.0;
-      fmid=denom(mid);
-
-      if(fabs(fmid)<1E-10)
-        {
-          return(mid);
-        }
-
-      if(sgn(fmid)==sgn(fa))
-        {
-          lower=mid;
-          fa=fmid;
-        }
-      else
-        {
-          upper=mid;
-          fb=fmid;
-        }
-      ++it;
-    }
-  return(mid);
 }
 
 // Calculate correlation function by direct summation
@@ -186,7 +96,6 @@ double bisect(double lower, double upper)
 double *calcCorrelation(double *y, int nSamples, int nCorr)
 {
   double *corr=new double[nCorr];
-  int min;
   int t;
   int ttoMax;
 
@@ -226,7 +135,7 @@ double variance(double *y, int nSamples)
   return(v2);
 }
 
-void subtract_average(double *y, int nSamples)
+double calc_average(double *y, int nSamples)
 {
   double avg=0.0;
 
@@ -235,6 +144,13 @@ void subtract_average(double *y, int nSamples)
       avg+=y[i];
     }
   avg/=nSamples;
+
+  return(avg);
+}
+
+void subtract_average(double *y, int nSamples)
+{
+  double avg=calc_average(y, nSamples);
 
   for(int i=0;i<nSamples;++i)
     y[i]-=avg;
@@ -267,9 +183,6 @@ double *velocity_series(double *y, int nSamples, double timestep)
 double integrateCorr(double *acf, int nCorr, double timestep)
 {
   double I=0.0;
-  double threshhold;
-
-  threshhold=acf[0]*acf[0]*INTCUTOFF;
 
   for(int i=0;i<nCorr-1;++i)
     {
@@ -287,8 +200,7 @@ std::vector<double> readSeriesNAMD(char *fname, int &numSamples, int field)
 {
   std::ifstream datafile(fname, std::ifstream::in);
   std::vector<double> series;
-  double *timeSeries;
-  int i=0;
+
   std::string line;
   std::istringstream iss;
   int begin;
@@ -326,15 +238,13 @@ std::vector<double> readSeriesNAMD(char *fname, int &numSamples, int field)
 // store the number of points in numSamples
 // each line should store one time step
 
-std::vector<double> readSeriesRaw(char *fname, int &numSamples)
+std::vector<double> readSeriesCHARMM(char *fname, int &numSamples)
 {
   std::ifstream datafile(fname, std::ifstream::in);
   std::vector<double> series;
-  double *timeSeries;
-  int i=0;
+
   std::string line;
   std::istringstream iss;
-  int begin;
 
   numSamples=0;
 
@@ -360,14 +270,13 @@ std::vector<double> readSeriesRaw(char *fname, int &numSamples)
 // read time series from GROMACS file fname
 // // store the number of points in numSamples
 // // each line should store one time step
-//
 
-std::vector<double> readSeriesGROMACS(char *fname, int &numSamples)
+//  xxx change to split fields
+
+std::vector<double> readSeriesGROMACS(char *fname, int &numSamples, int field)
 {
   std::ifstream datafile(fname, std::ifstream::in);
   std::vector<double> series;
-  double *timeSeries;
-  int i=0;
   std::string line;
   std::string item;
   std::istringstream iss;
@@ -400,7 +309,7 @@ std::vector<double> readSeriesGROMACS(char *fname, int &numSamples)
 
 double leastsquares(const std::vector<double>& x, const std::vector<double>& y)
 {
-    int n=x.size();
+    unsigned int n=x.size();
     double s_x  = accumulate(x.begin(), x.begin(), 0.0);
     double s_y  = accumulate(y.begin(), y.end(), 0.0);
     double s_xx = inner_product(x.begin(), x.end(), x.begin(), 0.0);
@@ -438,65 +347,12 @@ double leastsquares_subset(const std::vector<double>& x, const  std::vector<doub
   return(b); 
 }
 
-// iteratively finds linear segment of D(s)
-// trims front or back percentage
-// stops when r2 is > 0.99 or length is now less than SEG_MIN fraction
-
-void find_linear_range(std::vector<double>& s, std::vector<double>& Ds, int &lower, int &upper)
-{
-  double m, b, r2=0.0;
-  int min_length=(upper-lower)*SEG_MIN;
-  
-  do
-    {
-      leastsquares_subset(s, Ds, lower, upper, m, b, r2);
-      
-      int delete_length=(upper-lower)*0.05;
-      
-      double mM=0.0, bM=0.0, r2M=0.0;
-      leastsquares_subset(s, Ds, lower+delete_length, upper-delete_length, mM, bM, r2M);
-
-      double mF=0.0, bF=0.0, r2F=0;
-      leastsquares_subset(s, Ds, lower, lower+delete_length, mF, bF, r2F);
-
-      double mB=0.0, bB=0.0, r2B=0.0;
-      leastsquares_subset(s, Ds, upper-delete_length, upper, mB, bB, r2B);
-
-      // test which section to delete.  Delete the least linear segment
-      if(fabs(r2B) < fabs(r2F))
-	{
-	  // the front is closer to the middle than the back. delete the back segment
-	  upper-=delete_length;
-	}
-      else
-	{
-	  // the back is closer to the middle than the front. delete the front segment
-	  lower+=delete_length;
-	}
-    }
-  while(r2<R2_THRESHOLD && (upper-lower)>min_length);
-}
-
-double exp_fit_linearregression(const std::vector<double>& x, const std::vector<double>& y)
-{
-  std::vector<double> lny;
-  int n=x.size();
-
-  for(int i=0;i<x.size();++i)
-    {
-      lny.push_back(log(y[i]));
-    }
-  double intercept=leastsquares(x, lny);
-
-  return(exp(intercept));
-}
-
 // searches backwards from second singularity until line tangent
 // to the curve would give a non-negative intercept
 
 int find_negative_bound(const std::vector<double>& x, const std::vector<double>& y)
 {
-  for(int i=x.size()-2;i>0;--i)
+  for(unsigned int i=x.size()-2;i>0;--i)
     {
       double slope=(y[i+1]-y[i])/(x[i+1]-x[i]);
       double intercept=y[i]-slope*x[i];
@@ -519,7 +375,7 @@ std::vector<double> diff(const std::vector<double>& x, const std::vector<double>
   
   df.push_back( init_slope1-(init_slope2-init_slope1));
   
-  for(int i=0;i<y.size()-1;++i)
+  for(unsigned int i=0;i<y.size()-1;++i)
     {
       df.push_back( (y.at(i+1)-y.at(i))/(x.at(i+1)-x.at(i)) );
     }
@@ -532,7 +388,7 @@ int findmin(const std::vector<double>& y)
   int min=0;
   double minval=fabs(y.at(0));
   
-  for(int i=0;i<y.size();++i)
+  for(unsigned int i=0;i<y.size();++i)
     {
       if(fabs(y.at(i))<minval)
 	{
@@ -551,7 +407,7 @@ std::vector<double> smooth(const std::vector<double>& y)
   ySmooth.push_back( (y.at(0) + y.at(1) + y.at(2))/3.0);
   ySmooth.push_back( (y.at(0) + y.at(1) + y.at(2) + y.at(3))/4.0);
 	      
-  for(int i=2;i<y.size()-2;++i)
+  for(unsigned int i=2;i<y.size()-2;++i)
     {
       ySmooth.push_back( (y.at(i-2) + y.at(i-1) + y.at(i) + y.at(i+1) + y.at(i+2))/5.0);
     }
@@ -562,7 +418,7 @@ std::vector<double> smooth(const std::vector<double>& y)
 
 int main(int argc, char *argv[])
 {
-  enum InputType {gromacs, namd, raw};
+  enum InputType {gromacs, namd, charmm};
   InputType  type=namd;
   
   bool write_acf;
@@ -571,25 +427,18 @@ int main(int argc, char *argv[])
   double *acf, *timeSeries;
   double I;
   char *fname, *acf_fname, *output_fname;
-  double var_m2;
   int field=1;
   int numSamples;
-  double varAnalytical;
-  double k=10.0*4.184*1000;
-  double varVelAnalytical;
   double varVel;
   double cutoff;
-
-  timestep=1.0;
-  varAnalytical=8.314*298.15/k;
-  varVelAnalytical=8.314*298.15/(18.01/1000.0)*1E-10;
-
+  double timestep=DEFAULT_TIMESTEP;
+  
   po::options_description desc("Allowed options");
 
   desc.add_options()
     ("help,h", "produce help message")
     ("input,i", po::value<std::string>()->required(), "file name of time series")
-    ("type,t", po::value<std::string>(), "type of time series (namd, charmm, gromacs, amber, txt)")
+    ("type,t", po::value<std::string>(), "type of time series (namd, charmm, gromacs)")
     ("cutoff,c", po::value<double>()->default_value(INTCUTOFF), "cutoff to integrate ACF")
     ("acf,a", po::value<std::string>()->required(), "file name to save autocorrelation functions in")
     ("output,o", po::value<std::string>()->required(), "file name to save output to")
@@ -628,19 +477,19 @@ int main(int argc, char *argv[])
 	    {
 	      type=gromacs;
 	    }
-	  else if(type_str.compare("raw")==0)
+	  else if(type_str.compare("charmm")==0)
 	    {
-	      type=raw;
+	      type=charmm;
 	    }
 	  else
 	    {
 	      type=namd;
-	      std::cout << "#NAMD format" << std::endl;
 	    }
 	}
      else
        {
-	 std::cout<<"Type of file not provided"<<std::endl;
+	 std::cout << "#Type of file not provided, defaulting to NAMD" << std::endl;
+	 type=namd;
        }
 
       if (vm.count("acf"))
@@ -656,26 +505,18 @@ int main(int argc, char *argv[])
           write_acf=false;
         }
 
-      if (vm.count("timestep"))
-        {
-          timestep=vm["timestep"].as<double>();
-          std::cout << "#Time step of " << timestep << " fs will be used." << std::endl;
-        }
-      else
-        {
-          timestep=DEFAULT_TIMESTEP;
-          std::cout << "#Default timestep of " << std::endl;
-        }
+      
+      std::cout << "#Time step of " << timestep << " fs will be used." << std::endl;
 
       if(vm.count("cutoff"))
       {
           cutoff=vm["cutoff"].as<double>();
-          std::cout<<"#Cutoff of "<<cutoff<<" will be used."<<std::endl;
+          std::cout<<"#ACF cutoff of " << cutoff << " will be used." << std::endl;
       }
       else
       {
           cutoff=INTCUTOFF;
-          std::cout<<"Default cutoff of "<<cutoff<<" will be used."<<std::endl;
+          std::cout<<"#Default cutoff of " << cutoff << " will be used." << std::endl;
       }
 
       if (vm.count("output"))
@@ -700,16 +541,17 @@ int main(int argc, char *argv[])
     { 
       series=readSeriesNAMD(fname, numSamples, field);
     }
-  else if(type=gromacs)
+  else if(type==gromacs)
     {
-      series=readSeriesGROMACS(fname, numSamples);
+      series=readSeriesGROMACS(fname, numSamples, field);
     }
   else
     {
-      series=readSeriesRaw(fname, numSamples);
+      series=readSeriesCHARMM(fname, numSamples);
     }
   timeSeries=&series[0];
-
+  
+  double avg=calc_average(timeSeries, numSamples);
   subtract_average(timeSeries, numSamples);
   velSeries=velocity_series(timeSeries, numSamples, timestep);
 
@@ -738,7 +580,6 @@ int main(int argc, char *argv[])
 
   out_file << "#var " << var << std::endl;
   out_file << "#varVel " << varVel << std::endl;
-  out_file << "#varVelAnalytical " << varVelAnalytical << std::endl;
   out_file << "#nCorr " << nCorr << std::endl;
 
   double s=0.0001;
@@ -766,12 +607,10 @@ int main(int argc, char *argv[])
   // find singularity numerically
   s=0.0001;
 
-  double root=1.0;
-  double s2=0.0;
   double root_one=s_min_loc;
   double root_two=0.0;
-  int both = 0;
-
+  double root=0.0;
+  
   while(s<=0.1)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
@@ -827,18 +666,11 @@ int main(int argc, char *argv[])
   out_file << "#Ds_min " << Ds_min << std::endl;
   
   // Step2: calculate s over range
-  //  s = (root_two - Ds_min)/3.3;
-  //  double s_max = (root_two - Ds_min)/2.4;
-  //  double s_delta=1.0*(s_max - s)/100; // calculate D(s) at 100 point
-  //  Ds_min*=1.2;
-  double s_range=root_two-Ds_min;
-  double s_min=Ds_min;
-  double s_max=root_two;
-  
-  //  double s_max=Ds_min+s_range*0.4;
-  //  double s_max=(root_two - Ds_min)/2.4;
 
-  double s_delta=s_range/1000;
+  double s_range=root_two-Ds_min;
+  double s_max=root_two;
+
+  double s_delta=s_range/1000.0;
   
   std::vector<double> s_values;
   std::vector<double> intDs;
@@ -848,77 +680,108 @@ int main(int argc, char *argv[])
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
       double Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
-      double logDs=log(Ds);
       out_file << std::setw(15) << std::left << s<< std::setw(15) << std::left <<  Ds << std::setw(15) << std::left << laplaceVACF << std::setw(15)<< std::left << -(laplaceVACF*var*varVel) << std::setw(15) << std::left << (laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
-      s_values.push_back(s);
-      intDs.push_back(Ds);
+      if(Ds>0)
+	{
+	  s_values.push_back(s);
+	  intDs.push_back(Ds);
+	}
       s=s+s_delta;
     }
   
   int upper=find_negative_bound(s_values, intDs);
   int lower=0;
   
-  //  find_linear_range(s_values, intDs, lower, upper);
-  
   // Step 3
   double m, b, r2;
   
-  //  leastsquares_subset(s_values, intDs, lower, upper, m, b, r2);
   std::vector<double> df=diff(s_values, intDs);
   std::vector<double> df_smooth=smooth(df);
   
   std::vector<double> ddf=diff(s_values, df);
   std::vector<double> ddf_smooth=smooth(ddf);
 
-  for(int i=0;i<ddf_smooth.size();++i)
-    {
-      std::cout << s_values.at(i) << " " << df.at(i) << " " << df_smooth.at(i) << " " << ddf.at(i) << " " << ddf_smooth.at(i) << std::endl;
-    }
-
-  int min_ddf=findmin(ddf_smooth);
-  std::cout << "#min " << min_ddf << std::endl;
+  std::vector<double> s_ddf_smooth_positive;
+  std::vector<double> ddf_smooth_positive;
   
-  while(ddf_smooth.at(lower)>ddf_smooth.at(min_ddf)*2.0 && lower<ddf_smooth.size()-1)
+  for(unsigned int i=0;i<ddf_smooth.size();++i)
     {
-      ++lower;
+      std::cout << s_values.at(i) << " " << intDs.at(i) << " " << df.at(i) << " " << df_smooth.at(i) << " " << ddf.at(i) << " " << ddf_smooth.at(i) << std::endl;
+      if(ddf_smooth.at(i)>0)
+	{
+	  s_ddf_smooth_positive.push_back(s_values.at(i));
+	  ddf_smooth_positive.push_back(ddf_smooth.at(i));
+	}
+    }
+  
+  int min_ddf=findmin(ddf_smooth_positive);
+  std::cout << "#min " << min_ddf << std::endl;
+  lower=min_ddf-1;
+  
+  while(lower>0 && ddf_smooth_positive.at(lower)<ddf_smooth_positive.at(min_ddf)*2.0)
+    {
+      --lower;
     }
   std::cout << "#lower " << lower <<  std::endl;
-  upper=lower+1;
-  while(ddf_smooth.at(upper)<ddf_smooth.at(min_ddf)*3.0 && upper < ddf_smooth.size()-1)
+
+  upper=min_ddf+1;
+  while(ddf_smooth_positive.at(upper) < ddf_smooth_positive.at(min_ddf)*3.0 && upper < ddf_smooth_positive.size()-1)
     {
       ++upper;
     }
   
   std::cout << "#lower " << lower << " upper " <<  upper << std::endl;
-  std::cout << "#lower_s " << s_values.at(lower) << " upper_s " <<  s_values.at(upper) << std::endl;
+  std::cout << "#lower_s " << s_ddf_smooth_positive.at(lower) << " upper_s " <<  s_ddf_smooth_positive.at(upper) << std::endl;
+
+  // ensure range includes at least 50 points (xxx replace with fraction xxx)
+  while((upper-lower)<50)
+    {
+      if(ddf_smooth_positive.at(upper) < ddf_smooth_positive.at(lower) && lower > 0)
+	{
+	  --lower;
+	}
+      else if(upper<ddf_smooth_positive.size())
+	{
+	  ++upper;
+	}
+      else
+	{
+	  break;
+	}
+    }
+  std::cout << "#lower extend " << lower << " upper " <<  upper << std::endl;
+  std::cout << "#lower_s extend" << s_ddf_smooth_positive.at(lower) << " upper_s " <<  s_ddf_smooth_positive.at(upper) << std::endl;
   
-  leastsquares_subset(s_values, intDs, lower, upper, m, b, r2);
-
-  std::vector<double> s_values_poly;
-  std::vector<double> intDs_poly;
-
-  s=s_values.at(lower);
-  s_max=s_values.at(upper);
+  s=s_ddf_smooth_positive.at(lower);
+  s_max=s_ddf_smooth_positive.at(upper);
   s_delta=(s_max-s)/100.0;
+
+  
+  std::vector<double> s_final;
+  std::vector<double> ds_final;
   
   while(s<=s_max)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
-      double Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
-      s_values_poly.push_back(s);
-      intDs_poly.push_back(Ds);
+      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
+      Ds_prev=Ds;
+      Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
+            
+      s_final.push_back(s);
+      ds_final.push_back(Ds);
+
       s=s+s_delta;
     }
   
-  std::vector<double> P=polyfit(s_values_poly, intDs_poly, 2);
-  
+  // linear fit over range
+  leastsquares_subset(s_final, ds_final, 0, s_final.size(), m, b, r2);
+
+  out_file << "#avg = " << avg << std::endl;
   out_file << "#I = " << I << std::endl;
   out_file << "#var = " << var << std::endl;
-  out_file << "#D = " << var*var/I << " A2/fs " << std::endl;
   out_file << "#D = " << var*var/I*0.1 << " cm2/s " << std::endl;
-  out_file << "#Ds (poly)= " << P[0]*0.1 << " cm2/s " << std::endl;
   out_file << "#Ds (sub)= " << b*0.1 << " cm2/s " << std::endl;
-
+  
   out_file.close();
 
   delete[] acf;
