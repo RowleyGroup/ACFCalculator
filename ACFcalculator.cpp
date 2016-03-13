@@ -67,7 +67,7 @@ double laplace(double *series, double timestep, double s, int length)
 }
 
 
-double denom(double s, double timestep)
+double denom_func(double s)
 {
   double laplaceVACF=laplace(vacf, timestep, s, nCorr);
   double f=laplaceVACF*(s*var+varVel/s)-var*varVel;
@@ -311,7 +311,7 @@ std::vector<double> readSeriesGROMACS(char *fname, int &numSamples, int field)
 		  cline+=nchar;
 		}
 	      // convert nm to Angstrom
-	      series.push_back(dbl/10.0);
+	      series.push_back(dbl*10.0);
 	      ++numSamples;
 	    }
 	  catch (std::exception& e)
@@ -449,7 +449,8 @@ int main(int argc, char *argv[])
   int field=1;
   int numSamples;
   double cutoff;
-
+  int bits = std::numeric_limits<double>::digits;
+  
   po::options_description desc("Allowed options", 1024, 512);
 
   desc.add_options()
@@ -612,11 +613,6 @@ int main(int argc, char *argv[])
     }
     
   std::ofstream out_file(output_fname,  std::ofstream::out);
-  std::cout << "#output " << output_fname << std::endl;
-
-  out_file << "#var " << var << std::endl;
-  out_file << "#varVel " << varVel << std::endl;
-  out_file << "#nCorr " << nCorr << std::endl;
 
   double s=S_INCREMENT;
 
@@ -625,99 +621,29 @@ int main(int argc, char *argv[])
   
   out_file << "#" << std::setw(15) << std::left << "s"<< std::setw(15) << std::left <<"Ds" << std::setw(15) << std::left << "laplaceVACF" << std::setw(15) << std::left << "Ds numerator" << std::setw(15) << std::left << "Ds denominator" << std::endl;
 
-  while(s<=1.0)
-    {
-      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
-      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
-      double Ds_s=-(laplaceVACF*var*varVel)/denom;
+  // find sigularities by root finding algorithms
 
-      if(denom<s_min_num)
-        {
-          s_min_num=denom;
-          s_min_loc=s;
-        }
+  // find minimum in denominator
 
-      out_file << std::setw(15) << std::left << s<< std::setw(15) << std::left <<  Ds_s << std::setw(15) << std::left << laplaceVACF << std::setw(15)<< std::left << -(laplaceVACF*var*varVel) << std::setw(15) << std::left << (laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
-      s=s+S_INCREMENT;
-    }
-
-  // find singularity numerically
-  s=S_INCREMENT;
-
-  double root_one=s_min_loc;
-  double root_two=0.0;
-  double root=0.0;
+  boost::uintmax_t max_iter=500;
+  boost::math::tools::eps_tolerance<double> tol(30);
   
-  while(s<=0.1)
-    {
-      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
-      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
-      
-      if(denom<0)
-        {
-          root=denom;
-          root_one=s;
-	  break;
-        }
-      s=s+S_INCREMENT;
-    }
+  std::pair<double, double> denom_min = boost::math::tools::brent_find_minima(denom_func, S_INCREMENT, 1.0, bits);
 
-  // find second singularity
-  // occurs when denominator becomes positive again
-  while(s<=1.0)
-    {
-      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
-      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
+  std::pair<double, double> singularity_one = boost::math::tools::toms748_solve(denom_func, S_INCREMENT, denom_min.first, tol, max_iter);
+  std::pair<double, double> singularity_two = boost::math::tools::toms748_solve(denom_func, denom_min.first, 1.0, tol, max_iter);
 
-      if(denom>0)
-        {
-	  root_two=s-S_INCREMENT;
-	  break;
-        }
+  std::cout << "sigularity " << singularity_one.first <<  " " << singularity_two.first << std::endl;
 
-      s=s+S_INCREMENT;
-    }
+  std::pair<double, double> Ds_min = boost::math::tools::brent_find_minima(Ds_func, singularity_one.first, singularity_two.first, bits);
   
-  double Ds=1.0;
-  double Ds_prev=1.0;
-  
-  out_file << "#1st singularity " << root_one << std::endl;
-  out_file << "#2nd singularity "<< root_two << std::endl;
 
-  // find minimum in Ds between first and second signularities
-
-  s=root_one;
-  while(s<=root_two)
-    {
-      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
-      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
-
-      Ds_prev=Ds;
-      Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
-
-      if(Ds>Ds_prev)
-        {
-          break;
-        }
-      s=s+S_INCREMENT;
-    }
-
-  int bits = std::numeric_limits<double>::digits;
-  std::pair<double, double> r = boost::math::tools::brent_find_minima(Ds_func, root_one, root_two, bits);
-
-  std::cout << "#roots" << root_one << " " << root_two << std::endl;
-  std::cout << "#s " << s <<  std::endl;
-  
-  std::cout << "x at minimum = " << r.first << ", f(" << r.first << ") = " << r.second << std::endl;
-  
-  double Ds_min=s;
-
-  out_file << "#Ds_min " << Ds_min << std::endl;
+  out_file << "#Ds_min " << Ds_min.first << std::endl;
   
   // Step2: calculate s over range
 
-  double s_range=root_two-Ds_min;
-  double s_max=root_two;
+  double s_range=singularity_two.first-Ds_min.first;
+  double s_max=singularity_two.first;
 
   double s_delta=s_range/1000.0;
   
@@ -725,15 +651,17 @@ int main(int argc, char *argv[])
   std::vector<double> intDs;
 
   out_file << std::setw(15) << std::left << "#s"<< std::setw(15) << std::left <<"Ds" << std::setw(15) << std::left << "laplaceVACF" << std::setw(15) << std::left << "Ds numerator" << std::setw(15) << std::left << "Ds denominator" << std::endl;
+  
   while(s<=s_max)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
-      double Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
-      out_file << std::setw(15) << std::left << s<< std::setw(15) << std::left <<  Ds << std::setw(15) << std::left << laplaceVACF << std::setw(15)<< std::left << -(laplaceVACF*var*varVel) << std::setw(15) << std::left << (laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
-      if(Ds>0)
+      double Ds_val=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
+      out_file << std::setw(15) << std::left << s<< std::setw(15) << std::left <<  Ds_val << std::setw(15) << std::left << laplaceVACF << std::setw(15)<< std::left << -(laplaceVACF*var*varVel) << std::setw(15) << std::left << (laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
+      
+      if(Ds_val>0)
 	{
 	  s_values.push_back(s);
-	  intDs.push_back(Ds);
+	  intDs.push_back(Ds_val);
 	}
       s=s+s_delta;
     }
@@ -799,7 +727,7 @@ int main(int argc, char *argv[])
 	}
     }
   std::cout << "#lower extend " << lower << " upper " <<  upper << std::endl;
-  std::cout << "#lower_s extend" << s_ddf_smooth_positive.at(lower) << " upper_s " <<  s_ddf_smooth_positive.at(upper) << std::endl;
+  std::cout << "#lower_s extend " << s_ddf_smooth_positive.at(lower) << " upper_s " <<  s_ddf_smooth_positive.at(upper) << std::endl;
   
   s=s_ddf_smooth_positive.at(lower);
   s_max=s_ddf_smooth_positive.at(upper);
@@ -813,23 +741,23 @@ int main(int argc, char *argv[])
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
       double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
-      Ds_prev=Ds;
-      Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
+
+      double Ds_val=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
             
       s_final.push_back(s);
-      ds_final.push_back(Ds);
+      ds_final.push_back(Ds_val);
 
       s=s+s_delta;
     }
   
   // linear fit over range
-  leastsquares_subset(s_final, ds_final, 0, s_final.size(), m, b, r2);
+  double Ds_intercept=0.0;
+  
+  leastsquares_subset(s_final, ds_final, 0, s_final.size(), m, Ds_intercept, r2);
 
   out_file << "#avg = " << avg << std::endl;
-  out_file << "#I = " << I << std::endl;
-  out_file << "#var = " << var << std::endl;
-  out_file << "#D = " << var*var/I*0.1 << " cm2/s " << std::endl;
-  out_file << "#Ds (sub)= " << b*0.1 << " cm2/s " << std::endl;
+  out_file << "#D (ACF) = " << var*var/I*0.1 << " cm2/s " << std::endl;
+  out_file << "#Ds (VACF) = " << Ds_intercept*0.1 << " cm2/s " << std::endl;
   
   out_file.close();
 
