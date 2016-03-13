@@ -20,10 +20,10 @@ using boost::math::tools::toms748_solve;
 
 #include <vector>
 
-#define INTCUTOFF 0.05
 #define DEFAULT_MAXCORR 1000
 #define DEFAULT_TIMESTEP 1
 #define SEG_MIN 0.2
+#define S_INCREMENT 0.0001
 
 #define LINEAR_BINS 10 // define range into bins
 
@@ -52,10 +52,7 @@ double *vacf;
 int nCorr;
 double var;
 double varVel;
-
-template <typename T> int sgn(T val) {
-    return (T(0) < val) - (val < T(0));
-}
+double timestep;
 
 double laplace(double *series, double timestep, double s, int length)
 {
@@ -77,10 +74,11 @@ double denom(double s, double timestep)
   return(f);
 }
 
-double Ds(double s, double timestep)
+double Ds_func(double s)
 {
   double laplaceVACF=laplace(vacf, timestep, s, nCorr);
   double f=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
+  std::cout << "s " << s << " " << laplaceVACF << " " << f << " " << var << " "<< varVel << std::endl;
   return(f);
 }
 
@@ -191,6 +189,19 @@ double integrateCorr(double *acf, int nCorr, double timestep)
   return(I);
 }
 
+double integrateCorrCutoff(double *acf, int nCorr, double timestep,  double cutoff)
+{
+  double I=0.0;
+
+  for(int i=0;i<nCorr-1;++i)
+    {
+      if(acf[i]<cutoff*acf[0])
+	break;
+      I+=0.5*(acf[i]+acf[i+1])*timestep;
+    }
+  return(I);
+}
+
 // read time series from filename fname
 // file is formed like NAMD colvar traj file
 // store the number of points in numSamples
@@ -289,10 +300,18 @@ std::vector<double> readSeriesGROMACS(char *fname, int &numSamples, int field)
 	{
 	  try
 	    {
-	      while(getline(iss,item,' '))
+	      double dbl;
+	      int nchar=0;
+	      char *cline=(char *) line.c_str();
+	      
+	      for(int i=1;i<=field;++i)
 		{
-		  series.push_back(atof(item.c_str()));
+		  if(sscanf(cline, "%lf%n", &dbl, &nchar) == 0)
+		    break;
+		  cline+=nchar;
 		}
+	      // convert nm to Angstrom
+	      series.push_back(dbl/10.0);
 	      ++numSamples;
 	    }
 	  catch (std::exception& e)
@@ -301,7 +320,7 @@ std::vector<double> readSeriesGROMACS(char *fname, int &numSamples, int field)
 	    }
 	}
     }
-  
+
   return(series);
 }
 
@@ -429,17 +448,15 @@ int main(int argc, char *argv[])
   char *fname, *acf_fname, *output_fname;
   int field=1;
   int numSamples;
-  double varVel;
   double cutoff;
-  double timestep=DEFAULT_TIMESTEP;
-  
-  po::options_description desc("Allowed options");
+
+  po::options_description desc("Allowed options", 1024, 512);
 
   desc.add_options()
     ("help,h", "produce help message")
     ("input,i", po::value<std::string>()->required(), "file name of time series")
     ("type,t", po::value<std::string>(), "type of time series (namd, charmm, gromacs)")
-    ("cutoff,c", po::value<double>()->default_value(INTCUTOFF), "cutoff to integrate ACF")
+    ("cutoff,c", po::value<double>()->default_value(0), "cutoff to integrate ACF")
     ("acf,a", po::value<std::string>()->required(), "file name to save autocorrelation functions in")
     ("output,o", po::value<std::string>()->required(), "file name to save output to")
     ("timestep,s", po::value<double>(&timestep)->default_value(DEFAULT_TIMESTEP), "time between samples in time series file (fs)")
@@ -451,13 +468,15 @@ int main(int argc, char *argv[])
     {
       po::variables_map vm;
       po::store(po::parse_command_line(argc, argv, desc), vm);
-      po::notify(vm);
 
       if (vm.count("help"))
         {
+	  std::cout << "Usage: ACFcalculator [options]" << std::endl;
+	  std::cout << desc;
           return 1;
         }
-
+      po::notify(vm);
+      
       if (vm.count("input"))
         {
           const std::string fname_str=vm["input"].as<std::string>();
@@ -509,16 +528,18 @@ int main(int argc, char *argv[])
       std::cout << "#Time step of " << timestep << " fs will be used." << std::endl;
 
       if(vm.count("cutoff"))
-      {
+	{
           cutoff=vm["cutoff"].as<double>();
-          std::cout<<"#ACF cutoff of " << cutoff << " will be used." << std::endl;
-      }
+	  if(cutoff>0.0)
+	    std::cout<<"#ACF cutoff of " << cutoff << " will be used." << std::endl;
+	  else
+	    std::cout<<"#No cutoff will be used to integrate the ACF." << std::endl;
+	}
       else
-      {
-          cutoff=INTCUTOFF;
-          std::cout<<"#Default cutoff of " << cutoff << " will be used." << std::endl;
-      }
-
+	{
+          std::cout<<"#No cutoff will be used in integraction of ACF." << std::endl;
+	}
+      
       if (vm.count("output"))
         {
           const std::string output_fname_str=vm["output"].as<std::string>();
@@ -549,9 +570,17 @@ int main(int argc, char *argv[])
     {
       series=readSeriesCHARMM(fname, numSamples);
     }
-  timeSeries=&series[0];
+
+  if(series.size()==0)
+    {
+      std::cerr << "Error: Time series could not be read from file." << std::endl;
+      return(1);
+    }
   
+  timeSeries=&series[0];
+
   double avg=calc_average(timeSeries, numSamples);
+  
   subtract_average(timeSeries, numSamples);
   velSeries=velocity_series(timeSeries, numSamples, timestep);
 
@@ -573,8 +602,15 @@ int main(int argc, char *argv[])
       acf_file.close();
     }
 
-  I=integrateCorr(acf, nCorr, timestep);
-
+  if(cutoff!=0)
+    {    
+      I=integrateCorrCutoff(acf, nCorr, timestep, cutoff);
+    }
+  else
+    {
+      I=integrateCorr(acf, nCorr, timestep);
+    }
+    
   std::ofstream out_file(output_fname,  std::ofstream::out);
   std::cout << "#output " << output_fname << std::endl;
 
@@ -582,17 +618,18 @@ int main(int argc, char *argv[])
   out_file << "#varVel " << varVel << std::endl;
   out_file << "#nCorr " << nCorr << std::endl;
 
-  double s=0.0001;
+  double s=S_INCREMENT;
 
   double s_min_num=1000;
   double s_min_loc=-1.0;
+  
   out_file << "#" << std::setw(15) << std::left << "s"<< std::setw(15) << std::left <<"Ds" << std::setw(15) << std::left << "laplaceVACF" << std::setw(15) << std::left << "Ds numerator" << std::setw(15) << std::left << "Ds denominator" << std::endl;
 
   while(s<=1.0)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
       double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
-      double Ds=-(laplaceVACF*var*varVel)/denom;
+      double Ds_s=-(laplaceVACF*var*varVel)/denom;
 
       if(denom<s_min_num)
         {
@@ -600,12 +637,12 @@ int main(int argc, char *argv[])
           s_min_loc=s;
         }
 
-      out_file << std::setw(15) << std::left << s<< std::setw(15) << std::left <<  Ds << std::setw(15) << std::left << laplaceVACF << std::setw(15)<< std::left << -(laplaceVACF*var*varVel) << std::setw(15) << std::left << (laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
-      s=s+0.0001;
+      out_file << std::setw(15) << std::left << s<< std::setw(15) << std::left <<  Ds_s << std::setw(15) << std::left << laplaceVACF << std::setw(15)<< std::left << -(laplaceVACF*var*varVel) << std::setw(15) << std::left << (laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
+      s=s+S_INCREMENT;
     }
 
   // find singularity numerically
-  s=0.0001;
+  s=S_INCREMENT;
 
   double root_one=s_min_loc;
   double root_two=0.0;
@@ -615,13 +652,14 @@ int main(int argc, char *argv[])
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
       double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
+      
       if(denom<0)
         {
           root=denom;
           root_one=s;
 	  break;
         }
-      s=s+0.0001;
+      s=s+S_INCREMENT;
     }
 
   // find second singularity
@@ -633,11 +671,11 @@ int main(int argc, char *argv[])
 
       if(denom>0)
         {
-	  root_two=s;
+	  root_two=s-S_INCREMENT;
 	  break;
         }
 
-      s=s+0.0001;
+      s=s+S_INCREMENT;
     }
   
   double Ds=1.0;
@@ -647,20 +685,31 @@ int main(int argc, char *argv[])
   out_file << "#2nd singularity "<< root_two << std::endl;
 
   // find minimum in Ds between first and second signularities
+
   s=root_one;
   while(s<=root_two)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
       double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
+
       Ds_prev=Ds;
       Ds=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
+
       if(Ds>Ds_prev)
         {
           break;
         }
-      s=s+0.00001;
+      s=s+S_INCREMENT;
     }
 
+  int bits = std::numeric_limits<double>::digits;
+  std::pair<double, double> r = boost::math::tools::brent_find_minima(Ds_func, root_one, root_two, bits);
+
+  std::cout << "#roots" << root_one << " " << root_two << std::endl;
+  std::cout << "#s " << s <<  std::endl;
+  
+  std::cout << "x at minimum = " << r.first << ", f(" << r.first << ") = " << r.second << std::endl;
+  
   double Ds_min=s;
 
   out_file << "#Ds_min " << Ds_min << std::endl;
