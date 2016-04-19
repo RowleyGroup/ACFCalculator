@@ -296,7 +296,7 @@ std::vector<double> readSeriesGROMACS(char *fname, int &numSamples, int field)
   
   while(getline(datafile,line))
     {
-      if(line.at(0)!='#'|| line.at(0)!='@')
+      if(line.at(0)!='#'&& line.at(0)!='@')
 	{
 	  try
 	    {
@@ -644,6 +644,11 @@ int main(int argc, char *argv[])
 
   double s_range=singularity_two.first-Ds_min.first;
   double s_max=singularity_two.first;
+  
+  if(s_range == 0)
+    {
+      throw std::out_of_range("No minimum found within singularities");
+    }
 
   double s_delta=s_range/1000.0;
   
