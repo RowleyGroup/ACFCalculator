@@ -23,9 +23,12 @@ using boost::math::tools::toms748_solve;
 #define DEFAULT_MAXCORR 1000
 #define DEFAULT_TIMESTEP 1
 #define SEG_MIN 0.2
+#define S_START 0.000001
+#define S_END 1.0
 #define S_INCREMENT 0.0001
-
-#define LINEAR_BINS 10 // define range into bins
+#define DENOM_TOL 1E-8
+#define FIT_WIDTH1 1000
+#define FIT_WIDTH2 1000
 
 // compile: g++ correlation.cpp -o correlation 
 
@@ -78,7 +81,7 @@ double Ds_func(double s)
 {
   double laplaceVACF=laplace(vacf, timestep, s, nCorr);
   double f=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
-  std::cout << "s " << s << " " << laplaceVACF << " " << f << " " << var << " "<< varVel << std::endl;
+//  std::cout << "Ds (s=" << s << ") = " << f << std::endl;
   return(f);
 }
 
@@ -279,10 +282,8 @@ std::vector<double> readSeriesCHARMM(char *fname, int &numSamples)
 }
 
 // read time series from GROMACS file fname
-// // store the number of points in numSamples
-// // each line should store one time step
-
-//  xxx change to split fields
+// store the number of points in numSamples
+// each line should store one time step
 
 std::vector<double> readSeriesGROMACS(char *fname, int &numSamples, int field)
 {
@@ -450,6 +451,7 @@ int main(int argc, char *argv[])
   int numSamples;
   double cutoff;
   int bits = std::numeric_limits<double>::digits;
+  double s1, s2;
   
   po::options_description desc("Allowed options", 1024, 512);
 
@@ -619,8 +621,6 @@ int main(int argc, char *argv[])
   double s_min_num=1000;
   double s_min_loc=-1.0;
   
-  out_file << "#" << std::setw(15) << std::left << "s"<< std::setw(15) << std::left <<"Ds" << std::setw(15) << std::left << "laplaceVACF" << std::setw(15) << std::left << "Ds numerator" << std::setw(15) << std::left << "Ds denominator" << std::endl;
-
   // find sigularities by root finding algorithms
 
   // find minimum in denominator
@@ -628,35 +628,45 @@ int main(int argc, char *argv[])
   boost::uintmax_t max_iter=500;
   boost::math::tools::eps_tolerance<double> tol(30);
   
-  std::pair<double, double> denom_min = boost::math::tools::brent_find_minima(denom_func, S_INCREMENT, 1.0, bits);
+  std::pair<double, double> denom_min = boost::math::tools::brent_find_minima(denom_func, S_START, S_END, bits);
 
-  std::pair<double, double> singularity_one = boost::math::tools::toms748_solve(denom_func, S_INCREMENT, denom_min.first, tol, max_iter);
-  std::pair<double, double> singularity_two = boost::math::tools::toms748_solve(denom_func, denom_min.first, 1.0, tol, max_iter);
+  std::pair<double, double> singularity_one = boost::math::tools::toms748_solve(denom_func, S_START, denom_min.first, tol, max_iter);
+  std::pair<double, double> singularity_two = boost::math::tools::toms748_solve(denom_func, denom_min.first, S_END, tol, max_iter);
 
-  std::cout << "sigularity " << singularity_one.first <<  " " << singularity_two.first << std::endl;
+  // find minimum of Ds
+  // contract range to that D(s) is positive inside boundsbounds are between roots
+  s1=singularity_one.first;
+    
+  while(denom_func(s1)>-DENOM_TOL)
+    {
+      s1+=S_INCREMENT;
+    }
 
-  std::pair<double, double> Ds_min = boost::math::tools::brent_find_minima(Ds_func, singularity_one.first, singularity_two.first, bits);
+  s2=singularity_two.first;
+  while(denom_func(s2)>-DENOM_TOL)
+    {
+      s2-=S_INCREMENT;
+    }
   
+  std::pair<double, double> Ds_min = boost::math::tools::brent_find_minima(Ds_func,
+									   s1,
+									   s2,
+									   bits);
+    
+  // Step 2: calculate s over range
 
-  out_file << "#Ds_min " << Ds_min.first << std::endl;
-  
-  // Step2: calculate s over range
+  double s_range=s2-Ds_min.first;
+  double s_max=s2;
 
-  double s_range=singularity_two.first-Ds_min.first;
-  double s_max=singularity_two.first;
-
-  double s_delta=s_range/1000.0;
+  double s_delta=s_range/FIT_WIDTH1;
   
   std::vector<double> s_values;
   std::vector<double> intDs;
 
-  out_file << std::setw(15) << std::left << "#s"<< std::setw(15) << std::left <<"Ds" << std::setw(15) << std::left << "laplaceVACF" << std::setw(15) << std::left << "Ds numerator" << std::setw(15) << std::left << "Ds denominator" << std::endl;
-  
   while(s<=s_max)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
       double Ds_val=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
-      out_file << std::setw(15) << std::left << s<< std::setw(15) << std::left <<  Ds_val << std::setw(15) << std::left << laplaceVACF << std::setw(15)<< std::left << -(laplaceVACF*var*varVel) << std::setw(15) << std::left << (laplaceVACF*(s*var+varVel/s)-var*varVel) << std::endl;
       
       if(Ds_val>0)
 	{
@@ -670,6 +680,7 @@ int main(int argc, char *argv[])
   int lower=0;
   
   // Step 3
+  
   double m, b, r2;
   
   std::vector<double> df=diff(s_values, intDs);
@@ -683,7 +694,6 @@ int main(int argc, char *argv[])
   
   for(unsigned int i=0;i<ddf_smooth.size();++i)
     {
-      std::cout << s_values.at(i) << " " << intDs.at(i) << " " << df.at(i) << " " << df_smooth.at(i) << " " << ddf.at(i) << " " << ddf_smooth.at(i) << std::endl;
       if(ddf_smooth.at(i)>0)
 	{
 	  s_ddf_smooth_positive.push_back(s_values.at(i));
@@ -692,14 +702,12 @@ int main(int argc, char *argv[])
     }
   
   int min_ddf=findmin(ddf_smooth_positive);
-  std::cout << "#min " << min_ddf << std::endl;
   lower=min_ddf-1;
   
   while(lower>0 && ddf_smooth_positive.at(lower)<ddf_smooth_positive.at(min_ddf)*2.0)
     {
       --lower;
     }
-  std::cout << "#lower " << lower <<  std::endl;
 
   upper=min_ddf+1;
   while(ddf_smooth_positive.at(upper) < ddf_smooth_positive.at(min_ddf)*3.0 && upper < ddf_smooth_positive.size()-1)
@@ -707,11 +715,9 @@ int main(int argc, char *argv[])
       ++upper;
     }
   
-  std::cout << "#lower " << lower << " upper " <<  upper << std::endl;
-  std::cout << "#lower_s " << s_ddf_smooth_positive.at(lower) << " upper_s " <<  s_ddf_smooth_positive.at(upper) << std::endl;
-
-  // ensure range includes at least 50 points (xxx replace with fraction xxx)
-  while((upper-lower)<50)
+  // ensure range is sufficiently wide
+  
+  while((upper-lower)<SEG_MIN*FIT_WIDTH1)
     {
       if(ddf_smooth_positive.at(upper) < ddf_smooth_positive.at(lower) && lower > 0)
 	{
@@ -726,17 +732,13 @@ int main(int argc, char *argv[])
 	  break;
 	}
     }
-  std::cout << "#lower extend " << lower << " upper " <<  upper << std::endl;
-  std::cout << "#lower_s extend " << s_ddf_smooth_positive.at(lower) << " upper_s " <<  s_ddf_smooth_positive.at(upper) << std::endl;
   
   s=s_ddf_smooth_positive.at(lower);
   s_max=s_ddf_smooth_positive.at(upper);
-  s_delta=(s_max-s)/100.0;
-
+  s_delta=(s_max-s)/FIT_WIDTH2;
   
   std::vector<double> s_final;
   std::vector<double> ds_final;
-  
   while(s<=s_max)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
@@ -749,8 +751,22 @@ int main(int argc, char *argv[])
 
       s=s+s_delta;
     }
+
+  s=s_delta;
+  std::cout << "#s Ds_val denom laplaceVACF" <<  std::endl;
+  while(s<=s_max*2)
+    {
+      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
+      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
+
+      double Ds_val=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
+
+      std::cout << s << " " << Ds_val << " " << denom << " " << laplaceVACF << std::endl;
+      s=s+s_delta;
+    }
   
   // linear fit over range
+
   double Ds_intercept=0.0;
   
   leastsquares_subset(s_final, ds_final, 0, s_final.size(), m, Ds_intercept, r2);
@@ -763,5 +779,4 @@ int main(int argc, char *argv[])
 
   delete[] acf;
   delete[] vacf;
-  //  series.earse();
 }
