@@ -20,8 +20,6 @@ using boost::math::tools::toms748_solve;
 
 #include <vector>
 
-#define DEFAULT_MAXCORR 1000
-#define DEFAULT_TIMESTEP 1
 #define SEG_MIN 0.2
 #define S_START 0.000001
 #define S_END 1.0
@@ -29,6 +27,18 @@ using boost::math::tools::toms748_solve;
 #define DENOM_TOL 1E-8
 #define FIT_WIDTH1 1000
 #define FIT_WIDTH2 1000
+#define kB 1.38064852E-23
+#define DEFAULT_TEMPERATURE 298.15
+#define NA 6.0221409e+23
+#define R 8.314
+
+const int default_maxcorr=1000;
+const double default_timestep=1.0;
+const double R=8.314;
+
+// thresholds for  warnings about decay of ACF and VACF
+const double acf_warning=0.02;
+const double vacf_warning=0.02;
 
 // compile: g++ correlation.cpp -o correlation 
 
@@ -57,13 +67,13 @@ double var;
 double varVel;
 double timestep;
 
-double laplace(double *series, double timestep, double s, int length)
+double laplace(double *series, double deltat, double s, int length)
 {
   double F=0.0;
 
   for(int i=0;i<length;++i)
     {
-      F+=exp(-s*i*timestep)*series[i]*timestep;
+      F+=exp(-s*i*deltat)*series[i]*deltat;
     }
 
   return(F);
@@ -159,14 +169,14 @@ void subtract_average(double *y, int nSamples)
 
 // calculate the velocity time series by numerically differentiating the position time series
 
-double *velocity_series(double *y, int nSamples, double timestep)
+double *velocity_series(double *y, int nSamples, double deltat)
 {
   double *vel=new double[nSamples-2];
   double avg=0.0;
   // calculate velocity by finite difference approach. units: A/fs
   for(int i=1;i<nSamples-1;++i)
     {
-      vel[i-1]=(y[i+1]-y[i-1])/(2.0*timestep);
+      vel[i-1]=(y[i+1]-y[i-1])/(2.0*deltat);
     }
 
   for(int i=0;i<nSamples-2;++i)
@@ -181,18 +191,18 @@ double *velocity_series(double *y, int nSamples, double timestep)
   return(vel);
 }
 
-double integrateCorr(double *acf, int nCorr, double timestep)
+double integrateCorr(double *acf, int nCorr, double deltat)
 {
   double I=0.0;
 
   for(int i=0;i<nCorr-1;++i)
     {
-      I+=0.5*(acf[i]+acf[i+1])*timestep;
+      I+=0.5*(acf[i]+acf[i+1])*deltat;
     }
   return(I);
 }
 
-double integrateCorrCutoff(double *acf, int nCorr, double timestep,  double cutoff)
+double integrateCorrCutoff(double *acf, int nCorr, double deltat,  double cutoff)
 {
   double I=0.0;
 
@@ -200,7 +210,7 @@ double integrateCorrCutoff(double *acf, int nCorr, double timestep,  double cuto
     {
       if(acf[i]<cutoff*acf[0])
 	break;
-      I+=0.5*(acf[i]+acf[i+1])*timestep;
+      I+=0.5*(acf[i]+acf[i+1])*deltat;
     }
   return(I);
 }
@@ -297,7 +307,7 @@ std::vector<double> readSeriesGROMACS(char *fname, int &numSamples, int field)
   
   while(getline(datafile,line))
     {
-      if(line.at(0)!='#'|| line.at(0)!='@')
+      if(line.at(0)!='#' && line.at(0)!='@')
 	{
 	  try
 	    {
@@ -452,6 +462,9 @@ int main(int argc, char *argv[])
   double cutoff;
   int bits = std::numeric_limits<double>::digits;
   double s1, s2;
+  double k=0.0;
+  double temperature=DEFAULT_TEMPERATURE;
+  double mass=1.0;
   
   po::options_description desc("Allowed options", 1024, 512);
 
@@ -462,9 +475,12 @@ int main(int argc, char *argv[])
     ("cutoff,c", po::value<double>()->default_value(0), "cutoff to integrate ACF")
     ("acf,a", po::value<std::string>()->required(), "file name to save autocorrelation functions in")
     ("output,o", po::value<std::string>()->required(), "file name to save output to")
-    ("timestep,s", po::value<double>(&timestep)->default_value(DEFAULT_TIMESTEP), "time between samples in time series file (fs)")
-    ("maxcorr,m", po::value<int>(&nCorr)->default_value(DEFAULT_MAXCORR), "maximum number of time steps to calculate correlation functions over")
+    ("timestep,s", po::value<double>(&timestep)->default_value(default_timestep), "time between samples in time series file (fs)")
+    ("maxcorr,m", po::value<int>(&nCorr)->default_value(default_maxcorr), "maximum number of time steps to calculate correlation functions over")
     ("field,f", po::value<int>(&field)->default_value(1), "index of field to read from time series file")
+    ("spring,k", po::value<double>(&k)->default_value(0), "spring constant of harmonic restraint (units: kcal A-2 /mol, optional)")
+    ("mass,w", po::value<double>(&mass)->default_value(0), "mass of the solute (units amu, optional)")
+    ("temperature,e", po::value<double>(&temperature)->default_value(0), "temperature (optional)")
     ;
 
   try
@@ -594,7 +610,44 @@ int main(int argc, char *argv[])
 
   var=variance(timeSeries, numSamples);
   varVel=variance(velSeries, numSamples);
+  std::cout << "#var " << var << std::endl;
+  std::cout << "#varVel " << varVel << std::endl;
 
+  // if a spring constant is defined, use it to calculate the variance
+  if(k>0.0)
+    {
+      double factor;
+      
+      // convert mass to kg
+      mass=1.66054e-27*mass;
+      k=k*4184.0;
+      
+      var=R*temperature/k;
+      
+      factor=var/acf[0];
+      for(int i=0;i<nCorr;++i)
+	acf[i]*=factor;
+      // units of A2/fs2
+
+      varVel=1.0E-10*kB*temperature/mass;
+      factor=varVel/vacf[0];
+      
+      for(int i=0;i<nCorr;++i)
+	vacf[i]*=factor;
+      std::cout << "#varNew " << var << std::endl;
+      std::cout << "#varVelNew " << varVel << std::endl;
+      
+    }
+  if(acf[nCorr-1]/var > acf_warning)
+    {
+      std::cout << "#WARNING: ACF has only decayed to " << acf[nCorr-1]/var*100 << "% of initial value at the end of the region of integration. " <<  std::endl;
+    }
+  
+  if(vacf[nCorr-1]/var > vacf_warning)
+    {
+      std::cout << "#WARNING: VACF has only decayed to " << vacf[nCorr-1]/var*100 << "% of initial value at the end of the region of integration. " <<  std::endl;
+    }
+  
   if(write_acf)
     {
       std::ofstream acf_file(acf_fname);
@@ -633,17 +686,24 @@ int main(int argc, char *argv[])
   std::pair<double, double> singularity_one = boost::math::tools::toms748_solve(denom_func, S_START, denom_min.first, tol, max_iter);
   std::pair<double, double> singularity_two = boost::math::tools::toms748_solve(denom_func, denom_min.first, S_END, tol, max_iter);
 
-  // find minimum of Ds
-  // contract range to that D(s) is positive inside boundsbounds are between roots
+  // using the singularities as the bounds for the root finding can cause numerical instabilities or
+  // the minimization to search in the wrong direction
+  // this section adjusts s1 and s2 so that they bracket the minimum on the negative side
+  
+  // set a tolerance 
+  double denom_tol=denom_min.second/100;
+  
+  // contract range so that D(s) is positive range are between roots
+  // 
   s1=singularity_one.first;
     
-  while(denom_func(s1)>-DENOM_TOL)
+  while(denom_func(s1)>denom_tol)
     {
       s1+=S_INCREMENT;
     }
 
   s2=singularity_two.first;
-  while(denom_func(s2)>-DENOM_TOL)
+  while(denom_func(s2)>denom_tol)
     {
       s2-=S_INCREMENT;
     }
@@ -652,11 +712,18 @@ int main(int argc, char *argv[])
 									   s1,
 									   s2,
 									   bits);
-    
+  std::cout << "#s1 " << s1 << std::endl;
+  std::cout << "#s2 " << s2 << std::endl;
+  std::cout << "#Ds_min " << Ds_min.second << std::endl;
   // Step 2: calculate s over range
 
   double s_range=s2-Ds_min.first;
   double s_max=s2;
+  
+  if(s_range<=0.0)
+    {
+      throw std::out_of_range("No minimum found within singularities");
+    }
 
   double s_delta=s_range/FIT_WIDTH1;
   
@@ -668,7 +735,7 @@ int main(int argc, char *argv[])
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
       double Ds_val=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
       
-      if(Ds_val>0)
+      if(Ds_val>0.0)
 	{
 	  s_values.push_back(s);
 	  intDs.push_back(Ds_val);
@@ -694,7 +761,7 @@ int main(int argc, char *argv[])
   
   for(unsigned int i=0;i<ddf_smooth.size();++i)
     {
-      if(ddf_smooth.at(i)>0)
+      if(ddf_smooth.at(i)>0.0)
 	{
 	  s_ddf_smooth_positive.push_back(s_values.at(i));
 	  ddf_smooth_positive.push_back(ddf_smooth.at(i));
@@ -703,6 +770,7 @@ int main(int argc, char *argv[])
   
   int min_ddf=findmin(ddf_smooth_positive);
   lower=min_ddf-1;
+  double ddf_min=ddf_smooth_positive.at(min_ddf);
   
   while(lower>0 && ddf_smooth_positive.at(lower)<ddf_smooth_positive.at(min_ddf)*2.0)
     {
@@ -739,10 +807,11 @@ int main(int argc, char *argv[])
   
   std::vector<double> s_final;
   std::vector<double> ds_final;
+  
   while(s<=s_max)
     {
       double laplaceVACF=laplace(vacf, timestep, s, nCorr);
-      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
+      //      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
 
       double Ds_val=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
             
@@ -770,7 +839,10 @@ int main(int argc, char *argv[])
   double Ds_intercept=0.0;
   
   leastsquares_subset(s_final, ds_final, 0, s_final.size(), m, Ds_intercept, r2);
-
+  out_file << "#m= " << m << std::endl;
+  out_file << "#b= " << Ds_intercept << std::endl;
+  out_file << "#r2= " << r2 << std::endl;
+  out_file << "#ddDs_min = " << ddf_min << std::endl;
   out_file << "#avg = " << avg << std::endl;
   out_file << "#D (ACF) = " << var*var/I*0.1 << " cm2/s " << std::endl;
   out_file << "#Ds (VACF) = " << Ds_intercept*0.1 << " cm2/s " << std::endl;
