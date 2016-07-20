@@ -5,6 +5,7 @@
 #include <boost/numeric/ublas/matrix.hpp>
 #include <boost/numeric/ublas/lu.hpp>
 #include <boost/numeric/ublas/vector.hpp>
+#include <boost/tokenizer.hpp>
 
 using boost::math::policies::policy;
 using boost::math::tools::newton_raphson_iterate;
@@ -14,10 +15,9 @@ using boost::math::tools::bracket_and_solve_root;
 using boost::math::tools::toms748_solve;
 
 #include <stdexcept>
-
 #include <iostream>
 #include <fstream>
-
+#include <regex>
 #include <vector>
 
 #define SEG_MIN 0.2
@@ -30,21 +30,20 @@ using boost::math::tools::toms748_solve;
 #define kB 1.38064852E-23
 #define DEFAULT_TEMPERATURE 298.15
 #define NA 6.0221409e+23
-#define R 8.314
 
 const int default_maxcorr=1000;
 const double default_timestep=1.0;
 const double R=8.314;
 
-// thresholds for  warnings about decay of ACF and VACF
+// thresholds for warnings about decay of ACF and VACF
 const double acf_warning=0.02;
 const double vacf_warning=0.02;
 
-// compile: g++ correlation.cpp -o correlation 
+// compile: mkdir build  cd build  cmake ..  make
 
-// syntax: ./correlation time-series.traj 
+// syntax: ./ACFCalculator -i[infile] -t[type] -a[acf_outfile] -o[outfile] -f[field] -s[timestep] -r[ts_factor]
 
-// the time series is assumed to be in the format saved by the NAMD colvars module 
+// the time series can be in the format saved by NAMD solvars module, GROMACS, CHARMM, or others (use general mode)
 
 // calculate diffusion coefficient of a harmonically-restrained degree of freedom by 
 // calculating the autocorrelation function a time series of a molecular dynamics 
@@ -67,6 +66,7 @@ double var;
 double varVel;
 double timestep;
 
+// calculate laplace transform of a series at time s
 double laplace(double *series, double deltat, double s, int length)
 {
   double F=0.0;
@@ -79,7 +79,7 @@ double laplace(double *series, double deltat, double s, int length)
   return(F);
 }
 
-
+// calculate denominator of D(s) function
 double denom_func(double s)
 {
   double laplaceVACF=laplace(vacf, timestep, s, nCorr);
@@ -87,23 +87,21 @@ double denom_func(double s)
   return(f);
 }
 
+// calculate D(s) function
 double Ds_func(double s)
 {
   double laplaceVACF=laplace(vacf, timestep, s, nCorr);
   double f=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
-//  std::cout << "Ds (s=" << s << ") = " << f << std::endl;
   return(f);
 }
 
 // Calculate correlation function by direct summation
-
 //
 // Allen, M.; Tildesley, D. Computer Simulation of Liquids; Oxford Science Publications, Clarendon Press: Oxford, 1989. 
 // @y time series
 // @nSamples number of data points in time series
 // @nCorr length of correlation function to calculate
 // @return pointer to double array containing correlation function
-
 double *calcCorrelation(double *y, int nSamples, int nCorr)
 {
   double *corr=new double[nCorr];
@@ -137,6 +135,7 @@ double *calcCorrelation(double *y, int nSamples, int nCorr)
   return(corr);
 }
 
+// calculate variance in series
 double variance(double *y, int nSamples)
 {
   double v2=0.0;
@@ -146,7 +145,8 @@ double variance(double *y, int nSamples)
   return(v2);
 }
 
-double calc_average(double *y, int nSamples)
+// calculates average and subtracts it from series, returns average
+double calc_subtract_average(double *y, int nSamples)
 {
   double avg=0.0;
 
@@ -156,60 +156,39 @@ double calc_average(double *y, int nSamples)
     }
   avg/=nSamples;
 
+  for(int j=0; j<nSamples; ++j)
+    {
+      y[j]-=avg;
+    }
   return(avg);
 }
 
-void subtract_average(double *y, int nSamples)
-{
-  double avg=calc_average(y, nSamples);
-
-  for(int i=0;i<nSamples;++i)
-    y[i]-=avg;
-}
-
 // calculate the velocity time series by numerically differentiating the position time series
-
 double *velocity_series(double *y, int nSamples, double deltat)
 {
   double *vel=new double[nSamples-2];
   double avg=0.0;
+
   // calculate velocity by finite difference approach. units: A/fs
   for(int i=1;i<nSamples-1;++i)
     {
       vel[i-1]=(y[i+1]-y[i-1])/(2.0*deltat);
     }
 
-  for(int i=0;i<nSamples-2;++i)
-    {
-      avg+=vel[i];
-    }
-  avg/=(nSamples-2);
-
-  for(int i=0;i<nSamples-2;++i)
-    vel[i]-=avg;
-
+  avg=calc_subtract_average(vel, nSamples-2);
   return(vel);
 }
 
-double integrateCorr(double *acf, int nCorr, double deltat)
-{
-  double I=0.0;
-
-  for(int i=0;i<nCorr-1;++i)
-    {
-      I+=0.5*(acf[i]+acf[i+1])*deltat;
-    }
-  return(I);
-}
-
+// numerically integrates correlation series upto given cutoff
 double integrateCorrCutoff(double *acf, int nCorr, double deltat,  double cutoff)
 {
   double I=0.0;
 
   for(int i=0;i<nCorr-1;++i)
     {
-      if(acf[i]<cutoff*acf[0])
-	break;
+      if(cutoff!=0)
+        if(acf[i]<cutoff*acf[0])
+	  break;
       I+=0.5*(acf[i]+acf[i+1])*deltat;
     }
   return(I);
@@ -219,7 +198,6 @@ double integrateCorrCutoff(double *acf, int nCorr, double deltat,  double cutoff
 // file is formed like NAMD colvar traj file
 // store the number of points in numSamples
 // each line should store one time step
-
 std::vector<double> readSeriesNAMD(char *fname, int &numSamples, int field)
 {
   std::ifstream datafile(fname, std::ifstream::in);
@@ -258,10 +236,9 @@ std::vector<double> readSeriesNAMD(char *fname, int &numSamples, int field)
   return(series);
 }
 
-// read time series from filename fname
+// read time series from CHARMM file fname
 // store the number of points in numSamples
 // each line should store one time step
-
 std::vector<double> readSeriesCHARMM(char *fname, int &numSamples)
 {
   std::ifstream datafile(fname, std::ifstream::in);
@@ -294,7 +271,6 @@ std::vector<double> readSeriesCHARMM(char *fname, int &numSamples)
 // read time series from GROMACS file fname
 // store the number of points in numSamples
 // each line should store one time step
-
 std::vector<double> readSeriesGROMACS(char *fname, int &numSamples, int field)
 {
   std::ifstream datafile(fname, std::ifstream::in);
@@ -307,7 +283,7 @@ std::vector<double> readSeriesGROMACS(char *fname, int &numSamples, int field)
   
   while(getline(datafile,line))
     {
-      if(line.at(0)!='#' && line.at(0)!='@')
+      if(line.at(0)!='#'&& line.at(0)!='@')
 	{
 	  try
 	    {
@@ -335,23 +311,52 @@ std::vector<double> readSeriesGROMACS(char *fname, int &numSamples, int field)
   return(series);
 }
 
-// calculates intercept by linear interpolation
 
-double leastsquares(const std::vector<double>& x, const std::vector<double>& y)
+// read time series from filename fname
+// works for NAMD, GROMACS, CHARMM, and other formated files given correct field
+// store the number of points in numSamples
+// each line should store one time step
+// factor for converting time to fs
+std::vector<double> readSeriesGeneral(char *fname, int &numSamples, int field, double ts_factor)
 {
-    unsigned int n=x.size();
-    double s_x  = accumulate(x.begin(), x.begin(), 0.0);
-    double s_y  = accumulate(y.begin(), y.end(), 0.0);
-    double s_xx = inner_product(x.begin(), x.end(), x.begin(), 0.0);
-    double s_xy = inner_product(x.begin(), x.end(), y.begin(), 0.0);
-    double m=(n * s_xy - s_x * s_y) / (n * s_xx - s_x * s_x);
-    double b=(s_y-m*s_x)/n;
+  std::ifstream datafile(fname, std::ifstream::in);
+  std::vector<double> series;
+  std::string line;
 
-    return(b);
+  std::regex e ("[-]?[0-9]*\\.?[0-9]+");
+  boost::char_separator<char> sep{" ", "\t"};
+
+  numSamples=0;
+  while(getline(datafile,line))
+    {
+      // tokenizes a line by stripping spaces and tabs into traj vector
+      boost::tokenizer<boost::char_separator<char>> tok(line, sep);
+      std::vector<std::string> traj;
+
+      for(const auto& t:tok)
+  	{
+	  traj.push_back(t);
+	}
+
+      // adds value in field to series if start of line is numeric    
+      if(std::regex_match(traj[0], e))
+        { 
+          try
+            {
+              series.push_back(atof(traj[field].c_str())*ts_factor);
+              ++numSamples;
+            }
+           catch (std::exception& e)
+            {
+              break;
+            }
+        }
+        
+    }
+  return(series);
 }
 
 // calculates intercept by linear interpolation for subset of D(s)
-
 double leastsquares_subset(const std::vector<double>& x, const  std::vector<double>& y, int lower, int upper, double &m, double &b, double &r2)
 {
   int n=upper-lower;
@@ -364,6 +369,7 @@ double leastsquares_subset(const std::vector<double>& x, const  std::vector<doub
  
   m=(n * s_xy - s_x * s_y) / (n * s_xx - s_x * s_x);
   b=(s_y-m*s_x)/n;
+
   // calculate residuals, use to set r2
   double resSum=0.0;
   
@@ -379,7 +385,6 @@ double leastsquares_subset(const std::vector<double>& x, const  std::vector<doub
 
 // searches backwards from second singularity until line tangent
 // to the curve would give a non-negative intercept
-
 int find_negative_bound(const std::vector<double>& x, const std::vector<double>& y)
 {
   for(unsigned int i=x.size()-2;i>0;--i)
@@ -396,6 +401,7 @@ int find_negative_bound(const std::vector<double>& x, const std::vector<double>&
   return(x.size());
 }
 
+// calculate difference in inital slope
 std::vector<double> diff(const std::vector<double>& x, const std::vector<double>& y)
 {
   std::vector<double> df;
@@ -413,6 +419,7 @@ std::vector<double> diff(const std::vector<double>& x, const std::vector<double>
   return(df);
 }
 
+// finds the minimum
 int findmin(const std::vector<double>& y)
 {
   int min=0;
@@ -430,7 +437,6 @@ int findmin(const std::vector<double>& y)
 }
 
 // return 5 pt running average
-
 std::vector<double> smooth(const std::vector<double>& y)
 {
   std::vector<double> ySmooth;
@@ -446,10 +452,29 @@ std::vector<double> smooth(const std::vector<double>& y)
   return(ySmooth);
 }
 
+// calculates Ds from s to s_max
+void calcDs(double s, double s_max, double s_delta, std::vector<double>& s_vals, std::vector<double>& ds_vals)
+{
+  while(s<=s_max)
+    {
+      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
+      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
+      double Ds_val=-(laplaceVACF*var*varVel)/denom;
+
+      // adds if positive
+      if(Ds_val>0.0)
+        {
+          s_vals.push_back(s);
+          ds_vals.push_back(Ds_val);
+        }
+      s=s+s_delta;
+    }
+}
+
 int main(int argc, char *argv[])
 {
-  enum InputType {gromacs, namd, charmm};
-  InputType  type=namd;
+  enum InputType {gromacs, namd, charmm, general};
+  InputType type;
   
   bool write_acf;
   std::vector<double> series, seriesVel;
@@ -462,6 +487,7 @@ int main(int argc, char *argv[])
   double cutoff;
   int bits = std::numeric_limits<double>::digits;
   double s1, s2;
+  double ts_factor;
   double k=0.0;
   double temperature=DEFAULT_TEMPERATURE;
   double mass=1.0;
@@ -471,17 +497,18 @@ int main(int argc, char *argv[])
   desc.add_options()
     ("help,h", "produce help message")
     ("input,i", po::value<std::string>()->required(), "file name of time series")
-    ("type,t", po::value<std::string>(), "type of time series (namd, charmm, gromacs)")
+    ("type,t", po::value<std::string>(), "type of time series (namd, charmm, gromacs, general)")
     ("cutoff,c", po::value<double>()->default_value(0), "cutoff to integrate ACF")
     ("acf,a", po::value<std::string>()->required(), "file name to save autocorrelation functions in")
     ("output,o", po::value<std::string>()->required(), "file name to save output to")
     ("timestep,s", po::value<double>(&timestep)->default_value(default_timestep), "time between samples in time series file (fs)")
     ("maxcorr,m", po::value<int>(&nCorr)->default_value(default_maxcorr), "maximum number of time steps to calculate correlation functions over")
     ("field,f", po::value<int>(&field)->default_value(1), "index of field to read from time series file")
-    ("spring,k", po::value<double>(&k)->default_value(0), "spring constant of harmonic restraint (units: kcal A-2 /mol, optional)")
-    ("mass,w", po::value<double>(&mass)->default_value(0), "mass of the solute (units amu, optional)")
-    ("temperature,e", po::value<double>(&temperature)->default_value(0), "temperature (optional)")
-    ;
+    ("factor,r", po::value<double>(&ts_factor)->default_value(1), "factor for time conversion to fs when using general, default 1. ex: gromacs = 10")
+    ("spring,k", po::value<double>(&k)->default_value(0), "spring constant of harmonic restraint (units:kcal A-2 /mol, optional)") 
+    ("mass,w", po::value<double>(&mass)->default_value(0), "mass of the solute (units amu, optional)") 
+    ("temperature,e", po::value<double>(&temperature)->default_value(0), "temperature (optional)")  
+;
 
   try
     {
@@ -519,9 +546,18 @@ int main(int argc, char *argv[])
 	    {
 	      type=charmm;
 	    }
-	  else
+	  else if(type_str.compare("namd")==0)
 	    {
 	      type=namd;
+	    }
+          else if(type_str.compare("general")==0)                                                           
+            { 
+              type=general;
+            }
+	  else
+	    {
+	      std::cout<<"Type of file not recognized"<<std::endl;
+	      return(1);
 	    }
 	}
      else
@@ -542,8 +578,7 @@ int main(int argc, char *argv[])
           std::cout << "#ACF will not be saved" << std::endl;
           write_acf=false;
         }
-
-      
+ 
       std::cout << "#Time step of " << timestep << " fs will be used." << std::endl;
 
       if(vm.count("cutoff"))
@@ -552,7 +587,10 @@ int main(int argc, char *argv[])
 	  if(cutoff>0.0)
 	    std::cout<<"#ACF cutoff of " << cutoff << " will be used." << std::endl;
 	  else
-	    std::cout<<"#No cutoff will be used to integrate the ACF." << std::endl;
+	    {
+	      std::cout<<"#No cutoff will be used to integrate the ACF." << std::endl;
+	      cutoff=0;
+	    }
 	}
       else
 	{
@@ -577,17 +615,22 @@ int main(int argc, char *argv[])
       return 1;
     }
 
-  if(type==namd)
+if(type==namd)                                                                                         
     { 
-      series=readSeriesNAMD(fname, numSamples, field);
-    }
-  else if(type==gromacs)
+      series=readSeriesNAMD(fname, numSamples, field);                                                   
+    }                                                                                                    
+  else if (type==gromacs)                                                                                
+    {                                                                                                    
+      series=readSeriesGROMACS(fname, numSamples, field);                                                
+    }                                                                                                    
+  else if (type==charmm)                                                                                 
     {
-      series=readSeriesGROMACS(fname, numSamples, field);
-    }
+      series=readSeriesCHARMM(fname, numSamples);                                                        
+    } 
   else
-    {
-      series=readSeriesCHARMM(fname, numSamples);
+    { 
+      std::cout<<"File type could not be determined from input, using General with time series factor of "<<ts_factor <<std::endl;
+      series=readSeriesGeneral(fname, numSamples, field, ts_factor);                                                
     }
 
   if(series.size()==0)
@@ -598,9 +641,8 @@ int main(int argc, char *argv[])
   
   timeSeries=&series[0];
 
-  double avg=calc_average(timeSeries, numSamples);
-  
-  subtract_average(timeSeries, numSamples);
+  double avg=calc_subtract_average(timeSeries, numSamples);
+
   velSeries=velocity_series(timeSeries, numSamples, timestep);
 
   numSamples=numSamples-2;
@@ -626,28 +668,29 @@ int main(int argc, char *argv[])
       
       factor=var/acf[0];
       for(int i=0;i<nCorr;++i)
-	acf[i]*=factor;
+        acf[i]*=factor;
       // units of A2/fs2
-
+      
       varVel=1.0E-10*kB*temperature/mass;
       factor=varVel/vacf[0];
       
       for(int i=0;i<nCorr;++i)
-	vacf[i]*=factor;
+        vacf[i]*=factor;
       std::cout << "#varNew " << var << std::endl;
       std::cout << "#varVelNew " << varVel << std::endl;
-      
+  
     }
   if(acf[nCorr-1]/var > acf_warning)
     {
       std::cout << "#WARNING: ACF has only decayed to " << acf[nCorr-1]/var*100 << "% of initial value at the end of the region of integration. " <<  std::endl;
     }
-  
+ 
   if(vacf[nCorr-1]/var > vacf_warning)
     {
       std::cout << "#WARNING: VACF has only decayed to " << vacf[nCorr-1]/var*100 << "% of initial value at the end of the region of integration. " <<  std::endl;
     }
-  
+
+  // writes ACF and VACF to acf_outfile
   if(write_acf)
     {
       std::ofstream acf_file(acf_fname);
@@ -658,45 +701,30 @@ int main(int argc, char *argv[])
       acf_file.close();
     }
 
-  if(cutoff!=0)
-    {    
-      I=integrateCorrCutoff(acf, nCorr, timestep, cutoff);
-    }
-  else
-    {
-      I=integrateCorr(acf, nCorr, timestep);
-    }
-    
+  I=integrateCorrCutoff(acf, nCorr, timestep, cutoff);
   std::ofstream out_file(output_fname,  std::ofstream::out);
-
-  double s=S_INCREMENT;
-
-  double s_min_num=1000;
-  double s_min_loc=-1.0;
   
-  // find sigularities by root finding algorithms
-
-  // find minimum in denominator
-
+  // Step 1: find sigularities by root finding algorithms
+  double s=S_INCREMENT;
   boost::uintmax_t max_iter=500;
   boost::math::tools::eps_tolerance<double> tol(30);
   
+  // find minimum in denominator
   std::pair<double, double> denom_min = boost::math::tools::brent_find_minima(denom_func, S_START, S_END, bits);
-
   std::pair<double, double> singularity_one = boost::math::tools::toms748_solve(denom_func, S_START, denom_min.first, tol, max_iter);
   std::pair<double, double> singularity_two = boost::math::tools::toms748_solve(denom_func, denom_min.first, S_END, tol, max_iter);
+
 
   // using the singularities as the bounds for the root finding can cause numerical instabilities or
   // the minimization to search in the wrong direction
   // this section adjusts s1 and s2 so that they bracket the minimum on the negative side
-  
+
   // set a tolerance 
   double denom_tol=denom_min.second/100;
-  
+
   // contract range so that D(s) is positive range are between roots
-  // 
   s1=singularity_one.first;
-    
+
   while(denom_func(s1)>denom_tol)
     {
       s1+=S_INCREMENT;
@@ -708,15 +736,13 @@ int main(int argc, char *argv[])
       s2-=S_INCREMENT;
     }
   
-  std::pair<double, double> Ds_min = boost::math::tools::brent_find_minima(Ds_func,
-									   s1,
-									   s2,
-									   bits);
-  std::cout << "#s1 " << s1 << std::endl;
-  std::cout << "#s2 " << s2 << std::endl;
-  std::cout << "#Ds_min " << Ds_min.second << std::endl;
-  // Step 2: calculate s over range
+  std::pair<double, double> Ds_min = boost::math::tools::brent_find_minima(Ds_func, s1, s2, bits);
 
+  std::cout<<"#s1 "<<s1<<std::endl;
+  std::cout<<"#s2 "<<s2<<std::endl;
+  std::cout<<"#Ds_min "<<Ds_min.second<<std::endl;
+
+  // Step 2: calculate s over range
   double s_range=s2-Ds_min.first;
   double s_max=s2;
   
@@ -729,25 +755,12 @@ int main(int argc, char *argv[])
   
   std::vector<double> s_values;
   std::vector<double> intDs;
+ 
+  calcDs(s, s_max, s_delta, s_values, intDs); 
 
-  while(s<=s_max)
-    {
-      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
-      double Ds_val=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
-      
-      if(Ds_val>0.0)
-	{
-	  s_values.push_back(s);
-	  intDs.push_back(Ds_val);
-	}
-      s=s+s_delta;
-    }
-  
+  // Step 3: smoothening
   int upper=find_negative_bound(s_values, intDs);
   int lower=0;
-  
-  // Step 3
-  
   double m, b, r2;
   
   std::vector<double> df=diff(s_values, intDs);
@@ -768,10 +781,10 @@ int main(int argc, char *argv[])
 	}
     }
   
-  int min_ddf=findmin(ddf_smooth_positive);
+  int min_ddf=findmin(ddf_smooth_positive);  
   lower=min_ddf-1;
-  double ddf_min=ddf_smooth_positive.at(min_ddf);
-  
+  double ddf_min=ddf_smooth_positive.at(min_ddf);  
+ 
   while(lower>0 && ddf_smooth_positive.at(lower)<ddf_smooth_positive.at(min_ddf)*2.0)
     {
       --lower;
@@ -784,7 +797,6 @@ int main(int argc, char *argv[])
     }
   
   // ensure range is sufficiently wide
-  
   while((upper-lower)<SEG_MIN*FIT_WIDTH1)
     {
       if(ddf_smooth_positive.at(upper) < ddf_smooth_positive.at(lower) && lower > 0)
@@ -807,46 +819,21 @@ int main(int argc, char *argv[])
   
   std::vector<double> s_final;
   std::vector<double> ds_final;
-  
-  while(s<=s_max)
-    {
-      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
-      //      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
 
-      double Ds_val=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
-            
-      s_final.push_back(s);
-      ds_final.push_back(Ds_val);
-
-      s=s+s_delta;
-    }
-
-  s=s_delta;
-  std::cout << "#s Ds_val denom laplaceVACF" <<  std::endl;
-  while(s<=s_max*2)
-    {
-      double laplaceVACF=laplace(vacf, timestep, s, nCorr);
-      double denom=(laplaceVACF*(s*var+varVel/s)-var*varVel);
-
-      double Ds_val=-(laplaceVACF*var*varVel)/(laplaceVACF*(s*var+varVel/s)-var*varVel);
-
-      std::cout << s << " " << Ds_val << " " << denom << " " << laplaceVACF << std::endl;
-      s=s+s_delta;
-    }
-  
-  // linear fit over range
-
+  calcDs(s, s_max, s_delta, s_final, ds_final);
+ 
+  // Step 4: linear fit over range
   double Ds_intercept=0.0;
   
   leastsquares_subset(s_final, ds_final, 0, s_final.size(), m, Ds_intercept, r2);
-  out_file << "#m= " << m << std::endl;
-  out_file << "#b= " << Ds_intercept << std::endl;
-  out_file << "#r2= " << r2 << std::endl;
-  out_file << "#ddDs_min = " << ddf_min << std::endl;
+  out_file << "#m= " << m << std::endl; 
+  out_file << "#b= " << Ds_intercept << std::endl; 
+  out_file << "#r2= " << r2 << std::endl; 
+  out_file << "#ddDs_min = " << ddf_min << std::endl; 
   out_file << "#avg = " << avg << std::endl;
   out_file << "#D (ACF) = " << var*var/I*0.1 << " cm2/s " << std::endl;
   out_file << "#Ds (VACF) = " << Ds_intercept*0.1 << " cm2/s " << std::endl;
-  
+
   out_file.close();
 
   delete[] acf;
