@@ -12,7 +12,7 @@ for i in range(1, 6):
     p=[]
     temp=numpy.array([])
     for j in range(39, -1, -1):
-        fh=open(os.path.expanduser('~/out_up'+str(i)+'/out_up_sim_'+str(j)+'_2.out'), 'r')
+        fh=open(os.path.expanduser('~/out_up'+str(i)+'/out_up_sim_'+str(j)+'.out'), 'r')
         lines=fh.readlines()
         fh.close()
         
@@ -27,7 +27,7 @@ for i in range(1, 6):
 		p.append(int(-j))
 
     for k in range(0, 40):
-        fh=open(os.path.expanduser('~/out_down'+str(i)+'/out_down_sim_'+str(k)+'_2.out'), 'r')
+        fh=open(os.path.expanduser('~/out_down'+str(i)+'/out_down_sim_'+str(k)+'.out'), 'r')
         lines=fh.readlines()
         fh.close()
 
@@ -47,7 +47,7 @@ for i in range(1, 6):
       temp = numpy.dstack((lin, [x, d, d, ds, ds]))
       lin = temp
 
-    f_out = open(os.path.expanduser('~/out_ds'+str(i)+'_3.out'), 'w')
+    f_out = open(os.path.expanduser('~/out_ds'+str(i)+'.out'), 'w')
     for l in range(0, len(ds)):
     	f_out.write(str(p[l])+'\t'+str(ds[l])+ '\n')
     f_out.close()
