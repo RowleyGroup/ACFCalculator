@@ -1,6 +1,6 @@
 # ACFCalculator
 Usage: ACFcalculator [options]
-##Allowed options:
+##Allowed Options
 ```
   -h [ --help ]                produce help message
   -i [ --input ] arg           file name of time series
@@ -14,17 +14,14 @@ Usage: ACFcalculator [options]
   -r [ --factor] arg (=1)      factor for converting time to fs when using --type general
 ```
 
-##Requirements:
+##Requirements
 
 Boost C++ Libraries (http://www.boost.org/)
 
-##Compilation:
-
+##Compilation
+```
 mkdir build
-
 cd build
-
 cmake ..
-
 make
-
+```
