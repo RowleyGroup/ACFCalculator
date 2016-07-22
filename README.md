@@ -3,7 +3,6 @@ Usage: ACFcalculator [options]
 Allowed options:
 
   -h [ --help ]                produce help message
-  
   -i [ --input ] arg           file name of time series
   
   -t [ --type ] arg            type of time series (namd, charmm, gromacs, general)
