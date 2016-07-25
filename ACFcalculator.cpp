@@ -7,6 +7,11 @@
 #include <boost/numeric/ublas/vector.hpp>
 #include <boost/tokenizer.hpp>
 
+#ifdef FFTW
+#include <fftw3.h>
+#include <complex.h>
+#endif
+
 using boost::math::policies::policy;
 using boost::math::tools::newton_raphson_iterate;
 using boost::math::tools::halley_iterate;
@@ -20,16 +25,18 @@ using boost::math::tools::toms748_solve;
 #include <regex>
 #include <vector>
 
-#define SEG_MIN 0.2
-#define S_START 0.000001
-#define S_END 1.0
-#define S_INCREMENT 0.0001
-#define DENOM_TOL 1E-8
-#define FIT_WIDTH1 1000
-#define FIT_WIDTH2 1000
-#define kB 1.38064852E-23
-#define DEFAULT_TEMPERATURE 298.15
-#define NA 6.0221409e+23
+const double seg_min=0.2;
+const double s_start=0.000001;
+const double s_end=1.0;
+const double s_increment=0.0001;
+
+const double fit_width1=1000.0;
+const double fit_width2=1000.0;
+
+const double s_increment=0.0001;
+
+const double kB=1.38064852E-23;
+const double default_temperature=298.15;
 
 const int default_maxcorr=1000;
 const double default_timestep=1.0;
@@ -57,6 +64,7 @@ const double vacf_warning=0.02;
 // distance = angstrom
 // time = femptoseconds
 // velocity = Angstrom / femptoseconds
+
 
 namespace po = boost::program_options;
 
@@ -134,6 +142,49 @@ double *calcCorrelation(double *y, int nSamples, int nCorr)
 
   return(corr);
 }
+
+#ifdef FFTW
+/* 
+//Work in progress
+double *calcCorrelation_FFT(double *y, int nSamples, int nCorr)
+{
+  double *corr=new double[nCorr];
+  fftw_complex *in, *out;
+  fftw_plan p;
+
+  in = (fftw_complex *) fftw_malloc(sizeof(fftw_complex) * nSamples);
+  out = (fftw_complex *) fftw_malloc(sizeof(fftw_complex) * nSamples);
+  
+  p = fftw_plan_dft_1d(nSamples, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+  // calculate fft
+  fftw_execute(p);
+  
+  // calculate complex conjugate
+  cc_in=(fftw_real *) fftw_malloc(sizeof(fftw_real) * nSamples);
+  corr_out=(fftw_real *) fftw_malloc(sizeof(fftw_real) * nSamples);
+  
+  for(int i=0;i<nSamples;++i)
+    {
+      cc_in[i]=re(out[i])*re(out[i])+im(out[i])*im(out[i]);
+    }
+  fftw_destroy_plan(p);                                                                                                      
+
+  //calculate inverse fft
+  p_inv=fftw_plan_dft_1d(nSamples, cc_in, corr_out, FFTW_REVERSE, FFTW_ESTIMATE);
+
+  // copy correlation function into output and normalize
+  for(int i=0;i<nCorr;++i)
+    corr[i]=corr_out[i]/nSamples;
+  
+  ffw_execute(p);
+  
+  fftw_destroy_plan(p);
+  fftw_free(in);
+  fftw_free(out);
+  return(corr);
+}
+*/
+#endif
 
 // calculate variance in series
 double variance(double *y, int nSamples)
@@ -489,7 +540,8 @@ int main(int argc, char *argv[])
   double s1, s2;
   double ts_factor;
   double k=0.0;
-  double temperature=DEFAULT_TEMPERATURE;
+  double temperature=default_temperature;
+  
   double mass=1.0;
   
   po::options_description desc("Allowed options", 1024, 512);
@@ -705,14 +757,14 @@ if(type==namd)
   std::ofstream out_file(output_fname,  std::ofstream::out);
   
   // Step 1: find sigularities by root finding algorithms
-  double s=S_INCREMENT;
+  double s=s_increment;
   boost::uintmax_t max_iter=500;
   boost::math::tools::eps_tolerance<double> tol(30);
   
   // find minimum in denominator
-  std::pair<double, double> denom_min = boost::math::tools::brent_find_minima(denom_func, S_START, S_END, bits);
-  std::pair<double, double> singularity_one = boost::math::tools::toms748_solve(denom_func, S_START, denom_min.first, tol, max_iter);
-  std::pair<double, double> singularity_two = boost::math::tools::toms748_solve(denom_func, denom_min.first, S_END, tol, max_iter);
+  std::pair<double, double> denom_min = boost::math::tools::brent_find_minima(denom_func, s_start, s_end, bits);
+  std::pair<double, double> singularity_one = boost::math::tools::toms748_solve(denom_func, s_start, denom_min.first, tol, max_iter);
+  std::pair<double, double> singularity_two = boost::math::tools::toms748_solve(denom_func, denom_min.first, s_end, tol, max_iter);
 
 
   // using the singularities as the bounds for the root finding can cause numerical instabilities or
@@ -727,13 +779,13 @@ if(type==namd)
 
   while(denom_func(s1)>denom_tol)
     {
-      s1+=S_INCREMENT;
+      s1+=s_increment;
     }
 
   s2=singularity_two.first;
   while(denom_func(s2)>denom_tol)
     {
-      s2-=S_INCREMENT;
+      s2-=s_increment;
     }
   
   std::pair<double, double> Ds_min = boost::math::tools::brent_find_minima(Ds_func, s1, s2, bits);
@@ -751,7 +803,7 @@ if(type==namd)
       throw std::out_of_range("No minimum found within singularities");
     }
 
-  double s_delta=s_range/FIT_WIDTH1;
+  double s_delta=s_range/fit_width1;
   
   std::vector<double> s_values;
   std::vector<double> intDs;
@@ -797,7 +849,7 @@ if(type==namd)
     }
   
   // ensure range is sufficiently wide
-  while((upper-lower)<SEG_MIN*FIT_WIDTH1)
+  while((upper-lower)<seg_min*fit_width1)
     {
       if(ddf_smooth_positive.at(upper) < ddf_smooth_positive.at(lower) && lower > 0)
 	{
@@ -815,7 +867,7 @@ if(type==namd)
   
   s=s_ddf_smooth_positive.at(lower);
   s_max=s_ddf_smooth_positive.at(upper);
-  s_delta=(s_max-s)/FIT_WIDTH2;
+  s_delta=(s_max-s)/fit_width2;
   
   std::vector<double> s_final;
   std::vector<double> ds_final;
