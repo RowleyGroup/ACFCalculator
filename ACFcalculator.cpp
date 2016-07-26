@@ -33,8 +33,6 @@ const double s_increment=0.0001;
 const double fit_width1=1000.0;
 const double fit_width2=1000.0;
 
-const double s_increment=0.0001;
-
 const double kB=1.38064852E-23;
 const double default_temperature=298.15;
 
@@ -233,16 +231,16 @@ double *velocity_series(double *y, int nSamples, double deltat)
 // numerically integrates correlation series upto given cutoff
 double integrateCorrCutoff(double *acf, int nCorr, double deltat,  double cutoff)
 {
-  double I=0.0;
+  double acfInt=0.0;
 
   for(int i=0;i<nCorr-1;++i)
     {
       if(cutoff!=0)
         if(acf[i]<cutoff*acf[0])
 	  break;
-      I+=0.5*(acf[i]+acf[i+1])*deltat;
+      acfInt+=0.5*(acf[i]+acf[i+1])*deltat;
     }
-  return(I);
+  return(acfInt);
 }
 
 // read time series from filename fname
@@ -531,7 +529,7 @@ int main(int argc, char *argv[])
   std::vector<double> series, seriesVel;
   double *velSeries;
   double *acf, *timeSeries;
-  double I;
+  double acfInt;
   char *fname, *acf_fname, *output_fname;
   int field=1;
   int numSamples;
@@ -753,7 +751,7 @@ if(type==namd)
       acf_file.close();
     }
 
-  I=integrateCorrCutoff(acf, nCorr, timestep, cutoff);
+  acfInt=integrateCorrCutoff(acf, nCorr, timestep, cutoff);
   std::ofstream out_file(output_fname,  std::ofstream::out);
   
   // Step 1: find sigularities by root finding algorithms
@@ -883,7 +881,7 @@ if(type==namd)
   out_file << "#r2= " << r2 << std::endl; 
   out_file << "#ddDs_min = " << ddf_min << std::endl; 
   out_file << "#avg = " << avg << std::endl;
-  out_file << "#D (ACF) = " << var*var/I*0.1 << " cm2/s " << std::endl;
+  out_file << "#D (ACF) = " << var*var/acfInt*0.1 << " cm2/s " << std::endl;
   out_file << "#Ds (VACF) = " << Ds_intercept*0.1 << " cm2/s " << std::endl;
 
   out_file.close();
