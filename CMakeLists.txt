@@ -42,3 +42,5 @@ mark_as_advanced (FFTW_LIBRARIES FFTW_INCLUDES)
 if(FFTW_LIBRARIES)
   add_definitions(-DFFTW)
 endif ()
+
+add_executable(traj2diffusion traj2diffusion.cpp)
