@@ -154,10 +154,14 @@ double *calcCorrelation_FFT(double *y, int nSamples, int nCorr)
   out = (fftw_complex *) fftw_malloc(sizeof(fftw_complex) * nSamples);
   
   p = fftw_plan_dft_1d(nSamples, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+
   // calculate fft
   fftw_execute(p);
   
   // calculate complex conjugate
+  fftw_complex *cc_in, *corr_out;
+  fftw_plan p_inv;
+  
   cc_in=(fftw_real *) fftw_malloc(sizeof(fftw_real) * nSamples);
   corr_out=(fftw_real *) fftw_malloc(sizeof(fftw_real) * nSamples);
   
@@ -170,15 +174,18 @@ double *calcCorrelation_FFT(double *y, int nSamples, int nCorr)
   //calculate inverse fft
   p_inv=fftw_plan_dft_1d(nSamples, cc_in, corr_out, FFTW_REVERSE, FFTW_ESTIMATE);
 
+  ffw_execute(p_inv);
+
   // copy correlation function into output and normalize
   for(int i=0;i<nCorr;++i)
     corr[i]=corr_out[i]/nSamples;
   
-  ffw_execute(p);
+  fftw_destroy_plan(p_inv);
   
-  fftw_destroy_plan(p);
   fftw_free(in);
   fftw_free(out);
+  fftw_free(cc_in);
+  fftw_free(corr_out);
   return(corr);
 }
 */
