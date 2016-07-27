@@ -37,10 +37,9 @@ find_library (FFTW_LIBRARIES NAMES fftw3)
 include (FindPackageHandleStandardArgs)
 find_package_handle_standard_args (FFTW DEFAULT_MSG FFTW_LIBRARIES FFTW_INCLUDES)
 
-mark_as_advanced (FFTW_LIBRARIES FFTW_INCLUDES)
-
-if(FFTW_LIBRARIES)
+if(FFTW_FOUND)
   add_definitions(-DFFTW)
+  target_link_libraries(ACFcalculator ${FFTW_LIBRARIES})
 endif ()
 
 add_executable(traj2diffusion traj2diffusion.cpp)

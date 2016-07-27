@@ -8,8 +8,8 @@
 #include <boost/tokenizer.hpp>
 
 #ifdef FFTW
-#include <fftw3.h>
 #include <complex.h>
+#include <fftw3.h>
 #endif
 
 using boost::math::policies::policy;
@@ -142,53 +142,55 @@ double *calcCorrelation(double *y, int nSamples, int nCorr)
 }
 
 #ifdef FFTW
-/* 
+
 //Work in progress
 double *calcCorrelation_FFT(double *y, int nSamples, int nCorr)
 {
   double *corr=new double[nCorr];
-  fftw_complex *in, *out;
+  fftw_complex *out;
   fftw_plan p;
 
-  in = (fftw_complex *) fftw_malloc(sizeof(fftw_complex) * nSamples);
   out = (fftw_complex *) fftw_malloc(sizeof(fftw_complex) * nSamples);
   
-  p = fftw_plan_dft_1d(nSamples, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+  p = fftw_plan_dft_r2c_1d(nSamples, y, out, FFTW_ESTIMATE);
 
   // calculate fft
+  
   fftw_execute(p);
   
   // calculate complex conjugate
-  fftw_complex *cc_in, *corr_out;
+
   fftw_plan p_inv;
   
-  cc_in=(fftw_real *) fftw_malloc(sizeof(fftw_real) * nSamples);
-  corr_out=(fftw_real *) fftw_malloc(sizeof(fftw_real) * nSamples);
-  
+  double *cc_in=new double[nSamples];
+    
   for(int i=0;i<nSamples;++i)
     {
-      cc_in[i]=re(out[i])*re(out[i])+im(out[i])*im(out[i]);
+      cc_in[i]=out[i][0]*out[i][0]+out[i][1]*out[i][1];
+      std::cout << i << " " << cc_in[i] << std::endl;
     }
-  fftw_destroy_plan(p);                                                                                                      
 
+  fftw_destroy_plan(p);
+  
+  //  fftw_complex *cc_out=(fftw_complex *) fftw_malloc(sizeof(fftw_complex) * nSamples);
+  double *cc_out=new double[nSamples];
   //calculate inverse fft
-  p_inv=fftw_plan_dft_1d(nSamples, cc_in, corr_out, FFTW_REVERSE, FFTW_ESTIMATE);
+  p_inv=fftw_plan_r2r_1d(nSamples, cc_in, cc_out, FFTW_REDFT00, FFTW_ESTIMATE);
 
-  ffw_execute(p_inv);
+  fftw_execute(p_inv);
 
   // copy correlation function into output and normalize
   for(int i=0;i<nCorr;++i)
-    corr[i]=corr_out[i]/nSamples;
+    corr[i]=cc_out[i]/nSamples;
   
   fftw_destroy_plan(p_inv);
   
-  fftw_free(in);
-  fftw_free(out);
-  fftw_free(cc_in);
-  fftw_free(corr_out);
+  fftw_free(cc_out);
+  
+  delete[] cc_in;
   return(corr);
 }
-*/
+
 #endif
 
 // calculate variance in series
@@ -705,6 +707,7 @@ if(type==namd)
   numSamples=numSamples-2;
 
   acf=calcCorrelation(timeSeries, numSamples, nCorr);
+  calcCorrelation_FFT(timeSeries, numSamples, nCorr);
   vacf=calcCorrelation(velSeries, numSamples, nCorr);
 
   var=variance(timeSeries, numSamples);
