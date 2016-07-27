@@ -1,9 +1,7 @@
 ACFCalculator
 =============
 
-[ACFCalculator](https://github.com/RowleyGroup/ACFCalculator) implements the Velocity Autocorrelation Function (VACF) and
-Position Autocorrelation Function (PACF), which are Generalized Langevin methods used to determine diffusivity of a solute in
-heterogeneous environments such as bilipid membranes, see [T. B. Woolf and B. Roux](http://pubs.acs.org/doi/abs/10.1021/ja00092
+[ACFCalculator](https://github.com/RowleyGroup/ACFCalculator) implements methods for calculating the position-dependent diffusion coefficient of a solute from an MD time series using methods based on the Generalized Langevin Equation. These methods estimate the diffusion coefficient of a solute from the time series of a solute restrained by a harmonic potential. These methods calculate these coefficients from the friction coefficient of the system, which are related to the Velocity Autocorrelation Function (VACF) and Position Autocorrelation Function (PACF). See [T. B. Woolf and B. Roux](http://pubs.acs.org/doi/abs/10.1021/ja00092
 a048) and [G. Hummer](http://iopscience.iop.org/article/10.1088/1367-2630/7/1/034/meta;jsessionid=E4202C77BEAAF418645D578AA7EE8
 FC5.c1.iopscience.cld.iop.org). The theoretical background and justification for these methods can be found in the following 
 papers: for the VACF [T. B. Woolf](http://www.ncbi.nlm.nih.gov/pmc/articles/PMC45285/), [M. F. Schumaker](http://www.sciencedir
