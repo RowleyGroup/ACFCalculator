@@ -181,8 +181,10 @@ double *calcCorrelation_FFT(double *y, int nSamples, int nCorr)
 
   // copy correlation function into output and normalize
   for(int i=0;i<nCorr;++i)
-    corr[i]=cc_out[i]/nSamples;
-  
+    {
+      corr[i]=cc_out[i]/nSamples;
+      std::cout << i << " " << corr[i] << std::endl;
+    }
   fftw_destroy_plan(p_inv);
   
   fftw_free(cc_out);
@@ -568,7 +570,10 @@ int main(int argc, char *argv[])
     ("spring,k", po::value<double>(&k)->default_value(0), "spring constant of harmonic restraint (units:kcal A-2 /mol, optional)") 
     ("mass,w", po::value<double>(&mass)->default_value(0), "mass of the solute (units amu, optional)") 
     ("temperature,e", po::value<double>(&temperature)->default_value(0), "temperature (optional)")  
-;
+#ifdef FFTW
+    ("fft", po::value<std::string>(), "use fft to calculate correlation functions")
+#endif
+    ;
 
   try
     {
@@ -638,7 +643,16 @@ int main(int argc, char *argv[])
           std::cout << "#ACF will not be saved" << std::endl;
           write_acf=false;
         }
- 
+
+#ifdef FFTW
+      bool use_fft=false;
+      if (vm.count("fft"))
+	{
+	  std::cout << "#Correlation functions will be calculated using FFT" << std::endl;
+	  std::strcpy(acf_fname, acf_fname_str.c_str());
+	  use_fft=true;
+	}      
+#endif
       std::cout << "#Time step of " << timestep << " fs will be used." << std::endl;
 
       if(vm.count("cutoff"))
