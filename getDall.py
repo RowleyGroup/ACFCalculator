@@ -1,3 +1,6 @@
+#sample file for compiling ACFCalculator output; works in tandem w/ setup.sh
+#see documentation.md for more info
+
 import os
 import numpy
 import sys
