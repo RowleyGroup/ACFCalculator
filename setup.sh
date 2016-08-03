@@ -1,5 +1,8 @@
 #!/bin/bash
 
+#sample file for calling ACFcalculator for a set of gromacs-type trajectory files
+#see documentation.md for more info
+
 for i in `seq 0 39`
   do
     ./ACFcalculator -i ${HOME}/permeation/up-nve/xvg_files/sim_${i}/pullx.xvg -t gromacs -a ${HOME}/acf_up/acf_up_sim_${i}.dat -o ${HOME}/out_up/out_up_sim_${i}.out -f 2 -s 2 --maxcorr 2000
