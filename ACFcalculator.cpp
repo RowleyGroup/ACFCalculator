@@ -108,6 +108,7 @@ double Ds_func(double s)
 // @nSamples number of data points in time series
 // @nCorr length of correlation function to calculate
 // @return pointer to double array containing correlation function
+
 double *calcCorrelation(double *y, int nSamples, int nCorr)
 {
   double *corr=new double[nCorr];
@@ -142,7 +143,7 @@ double *calcCorrelation(double *y, int nSamples, int nCorr)
 }
 
 #ifdef FFTW
-
+/*
 //Work in progress
 double *calcCorrelation_FFT(double *y, int nSamples, int nCorr)
 {
@@ -192,7 +193,7 @@ double *calcCorrelation_FFT(double *y, int nSamples, int nCorr)
   delete[] cc_in;
   return(corr);
 }
-
+*/
 #endif
 
 // calculate variance in series
@@ -377,7 +378,7 @@ std::vector<double> readSeriesGROMACS(char *fname, int &numSamples, int field)
 // store the number of points in numSamples
 // each line should store one time step
 // factor for converting time to fs
-std::vector<double> readSeriesGeneral(char *fname, int &numSamples, int field, double ts_factor, p_factor)
+std::vector<double> readSeriesGeneral(char *fname, int &numSamples, int field, double ts_factor, double p_factor)
 {
   std::ifstream datafile(fname, std::ifstream::in);
   std::vector<double> series;
@@ -722,7 +723,7 @@ if(type==namd)
   numSamples=numSamples-2;
 
   acf=calcCorrelation(timeSeries, numSamples, nCorr);
-  calcCorrelation_FFT(timeSeries, numSamples, nCorr);
+  //  calcCorrelation_FFT(timeSeries, numSamples, nCorr);
   vacf=calcCorrelation(velSeries, numSamples, nCorr);
 
   var=variance(timeSeries, numSamples);
