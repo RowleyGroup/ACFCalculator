@@ -650,7 +650,6 @@ int main(int argc, char *argv[])
       if (vm.count("fft"))
 	{
 	  std::cout << "#Correlation functions will be calculated using FFT" << std::endl;
-	  std::strcpy(acf_fname, acf_fname_str.c_str());
 	  use_fft=true;
 	}      
 #endif
