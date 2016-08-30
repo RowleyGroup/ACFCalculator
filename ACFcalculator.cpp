@@ -628,8 +628,8 @@ int main(int argc, char *argv[])
 	}
      else
        {
-	 std::cout << "#Type of file not provided, defaulting to NAMD" << std::endl;
-	 type=namd;
+	 std::cout << "#Type of file not provided, defaulting to general file reader" << std::endl;
+	 type=general;
        }
 
       if (vm.count("acf"))
@@ -689,11 +689,8 @@ int main(int argc, char *argv[])
       return 1;
     }
 
-if(type==namd)                                                                                         
-    { 
-      series=readSeriesNAMD(fname, numSamples, field);                                                   
-    }                                                                                                    
-  else if (type==gromacs)                                                                                
+
+  if (type==gromacs)                                                                                
     {                                                                                                    
       series=readSeriesGROMACS(fname, numSamples, field);                                                
     }                                                                                                    
