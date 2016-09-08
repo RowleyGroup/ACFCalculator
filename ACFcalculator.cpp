@@ -46,7 +46,7 @@ const double vacf_warning=0.02;
 
 // compile: mkdir build  cd build  cmake ..  make
 
-// syntax: ./ACFCalculator -i[infile] -t[type] -a[acf_outfile] -o[outfile] -f[field] -s[timestep] -r[ts_factor]
+// syntax: ./ACFCalculator -i[infile] -t[type] -a[acf_outfile] -o[outfile] -f[field] -s[timestep] 
 
 // the time series can be in the format saved by NAMD solvars module, GROMACS, CHARMM, or others (use general mode)
 
@@ -378,7 +378,7 @@ std::vector<double> readSeriesGROMACS(char *fname, int &numSamples, int field)
 // store the number of points in numSamples
 // each line should store one time step
 // factor for converting time to fs
-std::vector<double> readSeriesGeneral(char *fname, int &numSamples, int field, double ts_factor, double p_factor)
+std::vector<double> readSeriesGeneral(char *fname, int &numSamples, int field, double p_factor)
 {
   std::ifstream datafile(fname, std::ifstream::in);
   std::vector<double> series;
@@ -548,7 +548,7 @@ int main(int argc, char *argv[])
   double cutoff;
   int bits = std::numeric_limits<double>::digits;
   double s1, s2;
-  double ts_factor, p_factor;
+  double   p_factor;
   double k=0.0;
   double temperature=default_temperature;
   
@@ -566,7 +566,6 @@ int main(int argc, char *argv[])
     ("timestep,s", po::value<double>(&timestep)->default_value(default_timestep), "time between samples in time series file (fs)")
     ("maxcorr,m", po::value<int>(&nCorr)->default_value(default_maxcorr), "maximum number of time steps to calculate correlation functions over")
     ("field,f", po::value<int>(&field)->default_value(1), "index of field to read from time series file")
-    ("ts_factor,r", po::value<double>(&ts_factor)->default_value(1), "factor for time conversion to fs when using general, default 1. ex: for ps to fs use 10")
     ("p_factor,p", po::value<double>(&p_factor)->default_value(1), "factor for position to Angstrom when using general, default 1. ex: for nm to Angstrom use 10")
     ("spring,k", po::value<double>(&k)->default_value(0), "spring constant of harmonic restraint (units:kcal A-2 /mol, optional)") 
     ("mass,w", po::value<double>(&mass)->default_value(0), "mass of the solute (units amu, optional)") 
@@ -700,8 +699,7 @@ int main(int argc, char *argv[])
     } 
   else
     { 
-      std::cout<<"File type could not be determined from input, using General with time series factor of "<<ts_factor <<std::endl;
-      series=readSeriesGeneral(fname, numSamples, field, ts_factor, p_factor);                                                
+      series=readSeriesGeneral(fname, numSamples, field, p_factor);
     }
 
   if(series.size()==0)
