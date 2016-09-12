@@ -266,15 +266,9 @@ std::vector<double> readSeriesNAMD(char *fname, int &numSamples, int field)
 
   std::string line;
   std::istringstream iss;
-  int begin;
-
-  if(field==1)
-    begin=15;
-  else if(field==2)
-    begin=37;
-  else
-    begin=61;
-
+  
+  int begin=23*(field-1)+15;
+  
   numSamples=0;
 
   while(getline(datafile,line))
@@ -283,7 +277,7 @@ std::vector<double> readSeriesNAMD(char *fname, int &numSamples, int field)
         {
           try
             {
-              std::string str2=line.substr(begin,23);
+              std::string str2=line.substr(begin,21);
               series.push_back(atof(str2.c_str()));
               ++numSamples;
             }
@@ -689,14 +683,18 @@ int main(int argc, char *argv[])
     }
 
 
-  if (type==gromacs)                                                                                
+  if(type==gromacs)                                                                                
     {                                                                                                    
       series=readSeriesGROMACS(fname, numSamples, field);                                                
     }                                                                                                    
-  else if (type==charmm)                                                                                 
+  else if(type==charmm)                                                                                 
     {
       series=readSeriesCHARMM(fname, numSamples);                                                        
-    } 
+    }
+  else if(type==namd)
+    {
+      series=readSeriesNAMD(fname, numSamples, field);
+    }
   else
     { 
       series=readSeriesGeneral(fname, numSamples, field, p_factor);

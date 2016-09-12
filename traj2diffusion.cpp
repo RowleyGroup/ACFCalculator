@@ -10,14 +10,16 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <string>
 #include <cstdlib>
-#include <stdlib.h>
 #include <vector>
 #include <iterator>
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <regex>
+
+#include <boost/program_options.hpp>
+#include <boost/tokenizer.hpp>
 
 #ifndef M_PI_2
 #define M_PI_2 1.57079632679489661922
@@ -32,62 +34,11 @@
 //#define DEFAULT_T 373.0
 #define DEFAULT_T 298.15
 #define DEFAULT_DELTA 0.001
+#define DEFAULT_TIMESTEP 1.0
+#define DEFAULT_STRIDE 1
+#define DEFAULT_MAX_S 1000
 
-using namespace std;
-
-int pattern_match(const char *str, const char *pattern) {
-  enum State {
-    Exact,      // exact match
-    Any,        // ?
-    AnyRepeat    // *
-  };
-
-  const char *s = str;
-  const char *p = pattern;
-  const char *q = 0;
-  int state = 0;
-
-  int match = 1;
-
-  while (match && *p) 
-    {
-      if (*p == '*')
-	{
-	  state = AnyRepeat;
-	  q = p+1;
-	} 
-      else if (*p == '?') state = Any;
-      else state = Exact;
-
-      if (*s == 0) break;
-
-      switch (state) 
-	{
-	case Exact:
-	  match = *s == *p;
-	  s++;
-	  p++;
-	  break;
-	  
-	case Any:
-	  match = 1;
-	  s++;
-	  p++;
-	  break;
-
-	case AnyRepeat:
-	  match = 1;
-	  s++;
-	  
-	  if (*s == *q) p++;
-	  break;
-	}
-    }
-  
-  if (state == AnyRepeat) return (*s == *q);
-  else if (state == Any) return (*s == *p);
-  else return match && (*s == *p);
-}
+namespace po = boost::program_options;
 
 double calcmsd(double *crd1, double *crd2)
 {
@@ -107,18 +58,15 @@ double calcmsd(double *crd1, double *crd2)
 
 double **readSeriesNAMD(char *fname, int &numSamples)
 {
-  ifstream datafile(fname);
-  vector<double> seriesX, seriesY, seriesZ;
-  double *timeSeries;
-  int i=0;
-  string line;
-  istringstream iss;
-  int begin;
+  std::ifstream datafile(fname);
+  std::vector<double> seriesX, seriesY, seriesZ;
+  std::string line;
+  std::istringstream iss;
   double **crd;
 
   if(!datafile)
     {
-      cerr << "Error: Cannot read " << fname << endl;
+      std::cerr << "Error: Cannot read " << fname << std::endl;
     }
   
   numSamples=0;
@@ -129,50 +77,49 @@ double **readSeriesNAMD(char *fname, int &numSamples)
         {
           try
             {
-              string str2=line.substr(15,23);
+	      std::string str2=line.substr(15,23);
               seriesX.push_back(atof(str2.c_str()));
 
-              string str3=line.substr(37,23);
+	      std::string str3=line.substr(37,23);
               seriesY.push_back(atof(str3.c_str()));
 
-              string str4=line.substr(61,23);
+	      std::string str4=line.substr(61,23);
               seriesZ.push_back(atof(str4.c_str()));
 	      
               ++numSamples;
 	      
             }
-          catch (exception& e)
+          catch (std::exception& e)
             {
               break;
             }
         }
     }
- 
-    if( (crd=(double **) calloc(numSamples, sizeof(double *)))==NULL)
-      {
-	fprintf(stderr, "Error: Could not allocate memory for crd.\n");
-	exit(1);
-      }
-    
-    for(i=0;i<numSamples;++i)
-      {
-	if( (crd[i]=(double *) calloc(3, sizeof(double)))==NULL)
-	  {
-	    fprintf(stderr, "Error: Could not allocate memory for crd.\n");
-	    exit(1);
-	  }
-	crd[i][0]=seriesX[i];
-	crd[i][1]=seriesY[i];
-	crd[i][2]=seriesZ[i];
-      }
-    
+  
+  try
+    {
+      crd=new double*[numSamples];
+      
+      for(int i=0;i<numSamples;++i)
+	{
+	  crd[i]=new double[3];
+	  crd[i][0]=seriesX[i];
+	  crd[i][1]=seriesY[i];
+	  crd[i][2]=seriesZ[i];
+	}
+    }
+  catch(std::bad_alloc&)
+    {
+      std::cerr << "Could not allocate memory." << std::endl;
+      exit(1);
+    }
+
     seriesX.clear();
     seriesY.clear();
     seriesZ.clear();
     
     return(crd);
 }
-
 
 double dist(double **coords[3], int a, int b)
 {
@@ -254,7 +201,7 @@ void image(double **crd, int nframes, double L)
   delete[] pbc_images;
 }
 
-double slope(double timestep, double *msd, int n)
+double slope(double *msd, int n)
 {
   int i;
   double sum=0.0;
@@ -264,8 +211,8 @@ double slope(double timestep, double *msd, int n)
       sum+=(msd[i]/i);
     }
 
-  printf("#sum = %lf timestep = %lf\n", sum, timestep); 
-  return(sum/timestep/n);
+  printf("#sum = %lf\n", sum); 
+  return(sum/n);
 }
 
 
@@ -287,7 +234,7 @@ int main(int argc, char **argv)
  
     FILE *output_fh;
 
-    int maxT=10000;
+    int max_s=1000;
 
     double dt=DEFAULT_DELTA;
 
@@ -297,96 +244,129 @@ int main(int argc, char **argv)
     int mflag=0;
     int stride=100;
     int nframes;
-    int imaging=0;
-    double L;
+    bool imaging=false;
+    double L=0.0;
     int c;
     
     int *msd_counter;
     double *t, *msd;
     double D;
-    char *traj_filename=NULL;
+    char *traj_fname=NULL;
+    double timestep=1.0; // stores timestep in fs
     
-    opterr = 0;
+    po::options_description desc("Allowed options", 1024, 512);
     
-    while ((c = getopt (argc, argv, "ime:T:t:p:s:d:l:")) != -1)
-	switch (c)
-	{
-	    /* d, delta, timestep in ps */
-	    case 'd':
-	       dt=atof(optarg);
-	       break;
-	       /* i, turn on imaging for trajectories where this is off*/
-	    case 'l':
-	      L=atof(optarg);
-	      break;
-	    case 'i':
-		imaging=1;
-		break;
-	    /* m, flag to include average cell dipole term (otherwise assumed to be zero) */
-	    case 'm':
-		mflag = 1;
-		break;
-	    /* T, temperature, temperature in K */
-	    case 'T':
-		T = atof(optarg);
-		break;
-	    case 's':
-		stride=atoi(optarg);
-		break;
-	     case 't':
-	       traj_filename = optarg;
-	       break;
- 	    case '?':
-	     if (optopt == 't' || optopt == 'p' || optopt=='e')
-		 fprintf (stderr, "Option -%c requires an argument.\n", optopt);
-	     else
-	       {
-		 fprintf (stderr, "Unknown option `-%c'.\n", optopt);
-		 fprintf(stderr, "Syntax: %s -t traj_file [-d timestep (ps)] [-T temperature (K) \n", argv[0]);
-		 
-		 return 1;
-	       }
-	    default:
-		abort ();
-	}
-
-    if(traj_filename==NULL)
+    desc.add_options()
+      ("help,h", "produce help message")
+      ("traj,t", po::value<std::string>()->required(), "file name containing the time series (e.g., the colvar.traj file")
+      ("timestep,d", po::value<double>(&timestep)->default_value(DEFAULT_TIMESTEP), "time step of the simulation (fs)")
+      ("stride,s", po::value<int>(&stride)->default_value(DEFAULT_STRIDE), "number of steps between the stride")
+      ("cell,c", po::value<double>(&L), "length of unit cell")
+      ("max,m", po::value<int>(&max_s)->default_value(DEFAULT_MAX_S), "maximum number of steps to calculate MSD over")
+      ;
+    
+    try
       {
-	cerr << "Error: Time series file name must be provided" << endl;
+	po::variables_map vm;
+	po::store(po::parse_command_line(argc, argv, desc), vm);
+	
+	if (vm.count("help"))
+	  {
+	    std::cout << "Usage: ACFcalculator [options]" << std::endl;
+	    std::cout << desc;
+	    return 1;
+	  }
+	po::notify(vm);
+	
+	if (vm.count("traj"))
+	  {
+	    const std::string traj_fname_str=vm["traj"].as<std::string>();
+	    traj_fname = new char[traj_fname_str.length()+1];
+	    std::strcpy(traj_fname, traj_fname_str.c_str());
+	  }
+	else
+	  {
+	    std::cout << "Error: The number of the trajectory file must be provided." << std::endl;
+	    exit(1);
+	  }
+	
+	// stride is the number of time steps between entries in the colvars file
+	if (vm.count("stride"))
+	  {
+	    stride=vm["stride"].as<int>(); 
+	  }
+	else
+	  {
+	    std::cout << "Stride of colvars file must be provided." << std::endl;
+	    exit(1);
+	  }
+	
+	if (vm.count("timestep"))
+	  {
+	    dt=vm["timestep"].as<double>();
+	  }
+	else
+	  {
+	    std::cout << "Time step of simulation must be provided" << std::endl;
+	    exit(1);
+	  }
+	
+	if (vm.count("cell"))
+	  {
+	    L=vm["cell"].as<double>();
+	    imaging=true;
+	  }
+	else
+	  {
+	    std::cout << "No imaging is performed. This assumes that the simulation code does NOT wrap positions from the periodic boundary conditions" << std::endl;
+	  }
+      }
+    catch ( const std::exception& e )
+      {
+	std::cerr << e.what() << std::endl;
+	return 1;
+      }
+    
+    if(traj_fname==NULL)
+      {
+	std::cerr << "Error: Time series file name must be provided" << std::endl;
 	exit(0);
       }
-    
-    crd=readSeriesNAMD(traj_filename, nframes);
-    image(crd, nframes, L);
-    
-    cout << "#" << nframes << endl;
 
+    double spaceSeries=dt*stride;
+    
+    crd=readSeriesNAMD(traj_fname, nframes);
+    
+    if(imaging)
+      image(crd, nframes, L);
+    
+    std::cout << "#" << nframes << std::endl;
+    
     if(nframes<0)
       {
-	fprintf(stderr, "Error: Skipping more frames than there are in the trajectory.\n");
-        exit(1);
-      }
-
-    count=0;
-
-    if( (msd=(double *) calloc(maxT, sizeof(double)))==NULL)
-      {
-	fprintf(stderr, "Error: Could not allocate memory for mass array.\n");
+	std::cerr << "Error: Skipping more frames than there are in the trajectory." << std::endl;
 	exit(1);
       }
     
-    if( (msd_counter=(int *) calloc(maxT, sizeof(int)))==NULL)
+    count=0;
+
+    try
       {
-	fprintf(stderr, "Error: Could not allocate memory for msd_counter array.\n");
-    	exit(1);
+	msd=new double[max_s];
+	msd_counter=new int[max_s];
       }
-
-    bzero(msd, maxT*sizeof(double));
-    bzero(msd_counter, maxT*sizeof(int));
-
+    catch(std::bad_alloc&)
+      {
+	std::cerr << "Error: Could not allocate memory." << std::endl;
+	exit(1);	
+      }
+    
+    bzero(msd, max_s*sizeof(double));
+    bzero(msd_counter, max_s*sizeof(int));
+    
     for(i=0;i<nframes;i+=stride)
       {
-	for(j=0;j<maxT;j++)
+	for(j=0;j<max_s;j++)
 	  {
 	    if( (i+j)>=nframes)
 	      break;
@@ -395,19 +375,18 @@ int main(int argc, char **argv)
 	    msd_counter[j]=msd_counter[j]+1;
 	  }
       }
-
-    for(i=0;i<maxT;++i)
+    
+    for(i=0;i<max_s;++i)
       {
 	msd[i]/=msd_counter[i];
-	cout << i << " " << msd[i] << endl;
-		//, 
-	//       pbc_images[i][0], pbc_images[i][1], pbc_images[i][2]);
+	std::cout << i << " " << msd[i] << std::endl;
       }
-
     
-    D=slope(dt, msd, maxT)/stride/6.0;
-    printf("#D %le %le (A2/fs)\n", D, slope(dt, msd, maxT));
+    D=slope(msd, max_s)/spaceSeries/6.0;
+    
+    printf("#D %le (A2/fs)\n", D);
     printf("#D %le (cm2/s)\n", D*1E-1);
-
+    printf("#D %le (m2/s)\n", D*1E-5);
+    
     return(0);
 }
