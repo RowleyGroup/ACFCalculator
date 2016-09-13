@@ -43,3 +43,4 @@ if(FFTW_FOUND)
 endif ()
 
 add_executable(traj2diffusion traj2diffusion.cpp)
+target_link_libraries(traj2diffusion ${Boost_LIBRARIES})
