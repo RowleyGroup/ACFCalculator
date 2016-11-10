@@ -10,7 +10,7 @@ for the PACF [G. Hummer](http://iopscience.iop.org/article/10.1088/1367-2630/7/1
 E8FC5.c1.iopscience.cld.iop.org), [C. T. Lee](http://pubs.acs.org/doi/abs/10.1021/acs.jcim.6b00022).
 
 Use of the code can be referenced/acknowledged as : Gaalswyk, K. , Awoonor-Williams, E.,  Rowley, C.N., 
-“Generalized Langevin Methods for Calculating Transmembrane Diffusivity”.
+[Generalized Langevin Methods for Calculating Transmembrane Diffusivity](http://pubs.acs.org/doi/abs/10.1021/acs.jctc.6b00747) *J. Chem. Theory. Comput.* **2016**  doi: 10.1021/acs.jctc.6b00747
 
 
 Installation
