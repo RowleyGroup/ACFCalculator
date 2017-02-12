@@ -113,27 +113,29 @@ double *calcCorrelation(double *y, int nSamples, int nCorr)
 {
   double *corr=new double[nCorr];
   int t;
-  int ttoMax;
+  //  int ttoMax;
 
+#pragma omp parallel for
   for(int i=0;i<nCorr;++i)
     {
       corr[i]=0.0;
     }
-
+  
+#pragma omp parallel for
   for(int i=0;i<nSamples;++i)
     {
-      ttoMax=nSamples;
+      int ttoMax=nSamples;
 
       if(i+nCorr<nSamples)
         ttoMax=i+nCorr;
 
       for(int j=i;j<ttoMax;++j)
         {
-          t=j-i;
-          corr[t]+=y[i]*y[j];
+          corr[j-i]+=y[i]*y[j];
         }
     }
-
+  
+#pragma omp parallel for
   for(int i=0;i<nCorr;++i)
     {
       corr[i]=corr[i]/(nSamples-i);
