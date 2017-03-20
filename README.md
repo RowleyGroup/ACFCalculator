@@ -1,6 +1,6 @@
 # ACFCalculator
 Usage: ACFcalculator [options]
-##Allowed Options
+## Allowed Options
 ```
   -h [ --help ]                produce help message
   -i [ --input ] arg           file name of time series
@@ -14,11 +14,11 @@ Usage: ACFcalculator [options]
   -r [ --factor] arg (=1)      factor for converting time to fs when using --type general
 ```
 
-##Requirements
+## Requirements
 
 Boost C++ Libraries (http://www.boost.org/)
 
-##Compilation
+## Compilation
 ```
 mkdir build
 cd build
@@ -26,7 +26,7 @@ cmake ..
 make
 ```
 
-##References
+## References
 *Gaalswyk, K., Awoonor-Williams, E., Rowley, C. N. Generalized Langevin Methods for Calculating Transmembrane Diffusivity, J. Chem. Theory Comput. 2016, doi: [10.1021/acs.jctc.6b00747](http://pubs.acs.org/doi/abs/10.1021/acs.jctc.6b00747)
 
 *Awoonor-Williams, E., Rowley, C.N. Molecular simulation of nonfacilitated membrane permeation, Biochim. Biophys. Acta - Biomembranes 2016, doi: [10.1016/j.bbamem.2015.12.014](https://www.sciencedirect.com/science/article/pii/S0005273615004125)
