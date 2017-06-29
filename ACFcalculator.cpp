@@ -24,6 +24,7 @@ using boost::math::tools::toms748_solve;
 #include <fstream>
 #include <regex>
 #include <vector>
+#include <numeric>
 
 const double seg_min=0.2;
 const double s_start=0.000001;
