@@ -32,7 +32,7 @@ which will create the ACFCalculator executable.
 Command Line Arguments and File Formats
 ---------------------------------------
 
-###Arguments
+### Arguments
 
 ```
 	ACFCalculator -h [--help] -i [--input] -t [--type] -c [--cutoff] -a [--acf] 
@@ -112,3 +112,10 @@ noted in the membrane interior. Check that the system has been fully equilibrate
 function.
 
 Results are dependent on the choice of cutoff and maxcorr.
+
+
+## References
+* Gaalswyk, K., Awoonor-Williams, E., Rowley, C. N. Generalized Langevin Methods for Calculating Transmembrane Diffusivity, J. Chem. Theory Comput. 2016, doi: [10.1021/acs.jctc.6b00747](http://pubs.acs.org/doi/abs/10.1021/acs.jctc.6b00747)
+
+* Awoonor-Williams, E., Rowley, C.N. Molecular simulation of nonfacilitated membrane permeation, Biochim. Biophys. Acta - Biomembranes 2016, doi: [10.1016/j.bbamem.2015.12.014](https://www.sciencedirect.com/science/article/pii/S0005273615004125)
+
