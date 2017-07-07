@@ -55,7 +55,7 @@ are optional.
 |`field` | specifies the field index to read from the time series file. Note that NAMD and the general type begin indexing at 0, while GROMACS begins indexing at 1. Default is 1.|
 |`factor` | is used for converting time to fs when using the general type. A factor of 10 would convert from ps to fs. Default is 1.|
 
-###File Formats
+### File Formats
 
 NAMD formatted files are expected to be space-delimited files with comments prefaced by a "\# ". The field argument specifies 
 which column contains the time-series data. The first field contains the time in fs. In a two-column file, the second column 
@@ -97,8 +97,7 @@ methods. The .out file is formatted as:
 The script `getDall.py` is included to compile all of the the diffusion coefficients from several simulations into a single 
 file, which is particularly useful for doing position-dependent diffusivity where there can be several simulations. Some 
 modification of this script may be necessary, especially if not used in conjunction with the `setup.sh` script. This script 
-also prints to screen the average and standard deviation of the positional diffusion coefficients when compiling several sets 
-of data.
+also prints to screen the average and standard deviation of the positional diffusion coefficients when compiling several sets of data.
 
 Discussion
 ----------
@@ -113,6 +112,11 @@ function.
 
 Results are dependent on the choice of cutoff and maxcorr.
 
+## Examples
+
+Calculate the diffusion coefficients from a NAMD colvar time series (pos.colvars.traj). Save the ACF to acf.txt and the output file to out.txt. The correlation function is calculated to 2000 time steps. The timesteps are 2 fs apart.
+
+ACFcalculator --input pos.colvars.traj --type namd --acf acf.txt -o out.txt -m 2000 -s 2
 
 ## References
 * Gaalswyk, K., Awoonor-Williams, E., Rowley, C. N. Generalized Langevin Methods for Calculating Transmembrane Diffusivity, J. Chem. Theory Comput. 2016, doi: [10.1021/acs.jctc.6b00747](http://pubs.acs.org/doi/abs/10.1021/acs.jctc.6b00747)
